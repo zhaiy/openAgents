@@ -1,0 +1,43 @@
+workflow:
+  id: novel_writing
+  name: 小说创作工作流
+  description: 从大纲到成稿的完整创作流程（示例）
+
+steps:
+  - id: outline
+    agent: planner
+    task: |
+      根据以下主题生成一份小说大纲，包含：
+      1. 故事梗概（200字以内）
+      2. 主要角色（3-5个，每个角色写名字、身份和性格特点）
+      3. 章节规划（5章，每章一句话概述）
+
+      主题：{{input}}
+    gate: approve
+
+  - id: chapter_1
+    agent: writer
+    depends_on: [outline]
+    task: |
+      根据以下大纲撰写第1章，要求 2000-3000 字。
+      注意：紧扣大纲设定，注意人物性格的一致性。
+
+      大纲：
+      {{steps.outline.output}}
+
+  - id: review
+    agent: reviewer
+    depends_on: [chapter_1]
+    task: |
+      请审核以下小说章节，从以下三个维度给出评分和建议：
+      1. 剧情逻辑（1-10分）
+      2. 人物塑造（1-10分）
+      3. 文笔质量（1-10分）
+
+      每个维度请给出具体的改进建议。
+
+      章节内容：
+      {{steps.chapter_1.output}}
+
+output:
+  directory: ./output/{{workflow.id}}/{{run.id}}
