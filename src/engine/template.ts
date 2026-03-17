@@ -3,6 +3,7 @@ import path from 'node:path';
 
 interface TemplateContext {
   input: string;
+  inputs?: Record<string, unknown>;
   steps: Record<string, { outputFile?: string }>;
   workflowId: string;
   runId: string;
@@ -21,12 +22,37 @@ function resolveRunOutputPath(runDir: string, outputFile: string): string {
   return outputPath;
 }
 
+function resolveNestedValue(obj: Record<string, unknown>, keyPath: string): unknown {
+  const keys = keyPath.split('.');
+  let current: unknown = obj;
+  for (const key of keys) {
+    if (current === null || current === undefined || typeof current !== 'object') {
+      return undefined;
+    }
+    current = (current as Record<string, unknown>)[key];
+  }
+  return current;
+}
+
 export function renderTemplate(template: string, context: TemplateContext): string {
   return template.replace(/\{\{(.+?)\}\}/g, (_match, rawExpr: string) => {
     const expr = rawExpr.trim();
 
     if (expr === 'input') {
       return context.input;
+    }
+
+    // Support {{inputs.xxx}} syntax for structured input
+    if (expr.startsWith('inputs.') && context.inputs) {
+      const keyPath = expr.slice('inputs.'.length);
+      if (!keyPath) {
+        throw new Error(`Cannot resolve template variable {{${expr}}}: missing key path`);
+      }
+      const value = resolveNestedValue(context.inputs, keyPath);
+      if (value === undefined) {
+        throw new Error(`Cannot resolve template variable {{${expr}}}: key "${keyPath}" not found in inputs`);
+      }
+      return String(value);
     }
 
     if (expr === 'workflow.id') {

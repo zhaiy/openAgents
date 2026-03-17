@@ -120,7 +120,7 @@ export class StateManager {
     return path.join(this.outputDir, workflowId, runId);
   }
 
-  initRun(runId: string, workflowId: string, input: string, stepIds: string[]): RunState {
+  initRun(runId: string, workflowId: string, input: string, stepIds: string[], inputData?: Record<string, unknown>): RunState {
     const runDir = this.getRunDir(workflowId, runId);
     fs.mkdirSync(runDir, { recursive: true });
 
@@ -134,6 +134,7 @@ export class StateManager {
       workflowId,
       status: 'running',
       input,
+      inputData,
       startedAt: Date.now(),
       steps,
     };

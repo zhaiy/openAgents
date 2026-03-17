@@ -5,6 +5,7 @@ import { Command } from 'commander';
 import yaml from 'js-yaml';
 
 import { AgentConfigSchema, ProjectConfigSchema, WorkflowConfigSchema } from '../config/schema.js';
+import { ConfigValidator, type ValidationResult } from '../config/validator.js';
 import { getDefaultLocale, t } from '../i18n/index.js';
 import type { AgentConfig, WorkflowConfig } from '../types/index.js';
 import { resolveLocaleFromCommand } from './shared.js';
@@ -13,6 +14,11 @@ interface ValidationItem {
   file: string;
   valid: boolean;
   errors: string[];
+}
+
+interface ValidateOptions {
+  lang?: string;
+  verbose?: boolean;
 }
 
 function listYamlFiles(dir: string): string[] {
@@ -45,21 +51,41 @@ function zodErrors(error: { issues: Array<{ path: Array<PropertyKey>; message: s
   });
 }
 
+function formatValidationResult(result: ValidationResult, verbose: boolean): string {
+  const levelIcon = {
+    error: '❌',
+    warning: '⚠️',
+    info: 'ℹ️',
+  };
+  const icon = levelIcon[result.level];
+
+  // Only show info level messages in verbose mode
+  if (!verbose && result.level === 'info') {
+    return '';
+  }
+
+  return `  ${icon} ${result.file}: ${result.message}`;
+}
+
 export function createValidateCommand(): Command {
   const locale = getDefaultLocale();
   return new Command('validate')
     .description(t(locale, 'validateDescription'))
     .option('--lang <locale>', t(locale, 'langOption'))
-    .action((options: { lang?: string }, command: Command) => {
+    .option('-v, --verbose', t(locale, 'validateVerboseOption'))
+    .action((options: ValidateOptions, command: Command) => {
       const resolvedLocale = resolveLocaleFromCommand(command, options.lang);
+      const verbose = options.verbose ?? false;
       const projectRoot = process.cwd();
       const results: ValidationItem[] = [];
 
       const validAgents = new Map<string, AgentConfig>();
-      const validWorkflows: WorkflowConfig[] = [];
+      const validWorkflows = new Map<string, WorkflowConfig>();
       const workflowFileById = new Map<string, string>();
 
       const projectConfigPath = path.join(projectRoot, 'openagents.yaml');
+      let projectConfig = null;
+
       if (!fs.existsSync(projectConfigPath)) {
         results.push({
           file: 'openagents.yaml',
@@ -76,6 +102,9 @@ export function createValidateCommand(): Command {
           });
         } else {
           const parsed = ProjectConfigSchema.safeParse(parsedYaml.value);
+          if (parsed.success) {
+            projectConfig = parsed.data;
+          }
           results.push({
             file: 'openagents.yaml',
             valid: parsed.success,
@@ -112,12 +141,12 @@ export function createValidateCommand(): Command {
           results.push({ file: rel, valid: false, errors: zodErrors(parsed.error) });
           continue;
         }
-        validWorkflows.push(parsed.data);
+        validWorkflows.set(parsed.data.workflow.id, parsed.data);
         workflowFileById.set(parsed.data.workflow.id, rel);
         results.push({ file: rel, valid: true, errors: [] });
       }
 
-      for (const workflow of validWorkflows) {
+      for (const workflow of validWorkflows.values()) {
         const rel = workflowFileById.get(workflow.workflow.id) ?? `workflows/${workflow.workflow.id}.yaml`;
         const referencesErrors: string[] = [];
         for (const step of workflow.steps) {
@@ -165,6 +194,46 @@ export function createValidateCommand(): Command {
           fail: String(failCount),
         }),
       );
+
+      // Run advanced validation if schema validation passed
+      if (projectConfig && validAgents.size > 0 && failCount === 0) {
+        const validator = new ConfigValidator();
+        const advancedResults = validator.validate(projectConfig, validAgents, validWorkflows);
+
+        if (advancedResults.length > 0) {
+          console.log('');
+          console.log(t(resolvedLocale, 'validateAdvancedHeader'));
+          console.log('');
+
+          for (const result of advancedResults) {
+            const line = formatValidationResult(result, verbose);
+            if (line) {
+              console.log(line);
+            }
+          }
+
+          const errorCount = advancedResults.filter(r => r.level === 'error').length;
+          const warningCount = advancedResults.filter(r => r.level === 'warning').length;
+          const infoCount = advancedResults.filter(r => r.level === 'info').length;
+
+          console.log('');
+          console.log(
+            t(resolvedLocale, 'validateAdvancedSummary', {
+              errors: String(errorCount),
+              warnings: String(warningCount),
+              infos: String(infoCount),
+            }),
+          );
+
+          // Only set exit code for errors, not warnings
+          if (errorCount > 0) {
+            process.exitCode = 1;
+          }
+        } else {
+          console.log('');
+          console.log(t(resolvedLocale, 'validateNoIssues'));
+        }
+      }
 
       if (failCount > 0) {
         process.exitCode = 1;

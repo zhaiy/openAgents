@@ -81,3 +81,126 @@ describe('renderTemplate', () => {
     ).toThrow('outside run directory');
   });
 });
+
+describe('renderTemplate with inputs', () => {
+  it('replaces simple inputs variable', () => {
+    const out = renderTemplate('Name: {{inputs.name}}, Chapter: {{inputs.chapter}}', {
+      input: '',
+      inputs: { name: '新笔仙', chapter: 4 },
+      workflowId: 'wf1',
+      runId: 'run1',
+      runDir: '/tmp/none',
+      steps: {},
+    });
+    expect(out).toBe('Name: 新笔仙, Chapter: 4');
+  });
+
+  it('replaces nested inputs variable', () => {
+    const out = renderTemplate('Author: {{inputs.meta.author}}, Version: {{inputs.meta.version}}', {
+      input: '',
+      inputs: { meta: { author: 'John', version: '1.0' } },
+      workflowId: 'wf1',
+      runId: 'run1',
+      runDir: '/tmp/none',
+      steps: {},
+    });
+    expect(out).toBe('Author: John, Version: 1.0');
+  });
+
+  it('converts number to string', () => {
+    const out = renderTemplate('Chapter {{inputs.chapter}}', {
+      input: '',
+      inputs: { chapter: 5 },
+      workflowId: 'wf1',
+      runId: 'run1',
+      runDir: '/tmp/none',
+      steps: {},
+    });
+    expect(out).toBe('Chapter 5');
+  });
+
+  it('converts boolean to string', () => {
+    const out = renderTemplate('Enabled: {{inputs.enabled}}', {
+      input: '',
+      inputs: { enabled: true },
+      workflowId: 'wf1',
+      runId: 'run1',
+      runDir: '/tmp/none',
+      steps: {},
+    });
+    expect(out).toBe('Enabled: true');
+  });
+
+  it('throws for missing inputs key', () => {
+    expect(() =>
+      renderTemplate('{{inputs.nonexistent}}', {
+        input: '',
+        inputs: { name: 'test' },
+        workflowId: 'wf1',
+        runId: 'run1',
+        runDir: '/tmp/none',
+        steps: {},
+      }),
+    ).toThrow('not found in inputs');
+  });
+
+  it('throws for missing nested inputs key', () => {
+    expect(() =>
+      renderTemplate('{{inputs.meta.nonexistent}}', {
+        input: '',
+        inputs: { meta: { author: 'John' } },
+        workflowId: 'wf1',
+        runId: 'run1',
+        runDir: '/tmp/none',
+        steps: {},
+      }),
+    ).toThrow('not found in inputs');
+  });
+
+  it('throws when inputs is not provided', () => {
+    expect(() =>
+      renderTemplate('{{inputs.name}}', {
+        input: '',
+        workflowId: 'wf1',
+        runId: 'run1',
+        runDir: '/tmp/none',
+        steps: {},
+      }),
+    ).toThrow();
+  });
+
+  it('remains backward compatible when inputs not provided', () => {
+    const out = renderTemplate('input={{input}}, wf={{workflow.id}}', {
+      input: 'test-input',
+      workflowId: 'wf1',
+      runId: 'run1',
+      runDir: '/tmp/none',
+      steps: {},
+    });
+    expect(out).toBe('input=test-input, wf=wf1');
+  });
+
+  it('handles inputs with null value', () => {
+    const out = renderTemplate('Value: {{inputs.value}}', {
+      input: '',
+      inputs: { value: null },
+      workflowId: 'wf1',
+      runId: 'run1',
+      runDir: '/tmp/none',
+      steps: {},
+    });
+    expect(out).toBe('Value: null');
+  });
+
+  it('handles deeply nested inputs', () => {
+    const out = renderTemplate('{{inputs.level1.level2.level3}}', {
+      input: '',
+      inputs: { level1: { level2: { level3: 'deep-value' } } },
+      workflowId: 'wf1',
+      runId: 'run1',
+      runDir: '/tmp/none',
+      steps: {},
+    });
+    expect(out).toBe('deep-value');
+  });
+});

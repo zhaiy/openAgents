@@ -11,7 +11,10 @@ export class Scheduler {
     return this.plan.nodes
       .filter((node) => this.state.steps[node.id]?.status === 'pending')
       .filter((node) =>
-        node.dependencies.every((dependencyId) => this.state.steps[dependencyId]?.status === 'completed'),
+        node.dependencies.every((dependencyId) => {
+          const status = this.state.steps[dependencyId]?.status;
+          return status === 'completed' || status === 'skipped';
+        }),
       )
       .map((node) => node.id);
   }
@@ -35,6 +38,15 @@ export class Scheduler {
       if (rejected) {
         throw rejected.reason;
       }
+    }
+
+    const unfinished = Object.entries(this.state.steps)
+      .filter(([, step]) => step.status === 'pending' || step.status === 'running')
+      .map(([stepId]) => stepId);
+    if (unfinished.length > 0) {
+      throw new Error(
+        `Workflow stalled with unfinished steps: ${unfinished.join(', ')}. Check dependency statuses or failure strategy.`,
+      );
     }
   }
 }

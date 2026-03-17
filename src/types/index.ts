@@ -1,4 +1,4 @@
-export type RuntimeType = 'llm-direct' | 'openclaw' | 'opencode' | 'claude-code';
+export type RuntimeType = 'llm-direct' | 'openclaw' | 'opencode' | 'claude-code' | 'script';
 
 export interface AgentConfig {
   agent: {
@@ -11,8 +11,12 @@ export interface AgentConfig {
   };
   runtime: {
     type: RuntimeType;
-    model: string;
+    model?: string;
     timeout_seconds: number;
+  };
+  script?: {
+    file?: string;
+    inline?: string;
   };
 }
 
@@ -21,7 +25,24 @@ export interface RetryConfig {
   delay_seconds: number;
 }
 
+export interface CacheConfig {
+  enabled: boolean;
+  ttl?: number; // seconds, default 3600
+  key?: string; // custom key template (optional)
+}
+
 export type GateType = 'auto' | 'approve';
+
+export type OnFailureAction = 'fail' | 'skip' | 'fallback' | 'notify';
+
+export interface NotifyConfig {
+  webhook?: string;
+}
+
+export interface GateOptions {
+  autoApprove?: boolean;
+  gateTimeoutSeconds?: number;
+}
 
 export interface StepConfig {
   id: string;
@@ -30,6 +51,15 @@ export interface StepConfig {
   depends_on?: string[];
   gate?: GateType;
   retry?: RetryConfig;
+  cache?: CacheConfig;
+  on_failure?: OnFailureAction;
+  fallback_agent?: string;
+  notify?: NotifyConfig;
+}
+
+export interface OutputFileConfig {
+  step: string;
+  filename: string;
 }
 
 export interface WorkflowConfig {
@@ -41,7 +71,9 @@ export interface WorkflowConfig {
   steps: StepConfig[];
   output: {
     directory: string;
+    files?: OutputFileConfig[];
   };
+  cache?: CacheConfig;
 }
 
 export interface ProjectConfig {
@@ -69,6 +101,14 @@ export interface StepState {
   outputFile?: string;
   error?: string;
   retryCount?: number;
+  tokenUsage?: TokenUsage;
+  durationMs?: number;
+}
+
+export interface TokenUsage {
+  promptTokens?: number;
+  completionTokens?: number;
+  totalTokens: number;
 }
 
 export interface RunState {
@@ -76,6 +116,7 @@ export interface RunState {
   workflowId: string;
   status: RunStatus;
   input: string;
+  inputData?: Record<string, unknown>;
   startedAt: number;
   completedAt?: number;
   steps: Record<string, StepState>;
@@ -89,6 +130,8 @@ export type EventType =
   | 'step.started'
   | 'step.completed'
   | 'step.failed'
+  | 'step.skipped'
+  | 'step.cached'
   | 'step.retrying'
   | 'gate.waiting'
   | 'gate.approved'
@@ -122,6 +165,7 @@ export interface ExecuteParams {
 export interface ExecuteResult {
   output: string;
   tokensUsed?: number;
+  tokenUsage?: TokenUsage;
   duration: number;
 }
 

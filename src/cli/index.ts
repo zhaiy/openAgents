@@ -1,5 +1,15 @@
 #!/usr/bin/env node
 
+import { config as loadEnv } from 'dotenv';
+import path from 'node:path';
+
+// Load .env files with priority: .env.local > .env.{NODE_ENV} > .env
+// dotenv does not override existing environment variables by default
+const envFiles = ['.env.local', `.env.${process.env.NODE_ENV || 'development'}`, '.env'];
+for (const file of envFiles) {
+  loadEnv({ path: path.resolve(process.cwd(), file) });
+}
+
 import { Command } from 'commander';
 
 import { getDefaultLocale, resolveLocale, t } from '../i18n/index.js';
@@ -10,6 +20,9 @@ import { createInitCommand } from './init.js';
 import { createValidateCommand } from './validate.js';
 import { createAgentsCommand } from './agents.js';
 import { createWorkflowsCommand } from './workflows.js';
+import { createDebugCommand } from './debug.js';
+import { createDagCommand } from './dag.js';
+import { createCacheCommand } from './cache.js';
 
 const program = new Command();
 
@@ -28,5 +41,8 @@ program.addCommand(createInitCommand());
 program.addCommand(createValidateCommand());
 program.addCommand(createAgentsCommand());
 program.addCommand(createWorkflowsCommand());
+program.addCommand(createDebugCommand());
+program.addCommand(createDagCommand());
+program.addCommand(createCacheCommand());
 
 program.parse();

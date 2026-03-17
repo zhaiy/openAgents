@@ -15,6 +15,8 @@ interface OpenAIChatCompletionResponse {
     };
   }>;
   usage?: {
+    prompt_tokens?: number;
+    completion_tokens?: number;
     total_tokens?: number;
   };
   error?: {
@@ -96,6 +98,13 @@ export class LLMDirectRuntime implements AgentRuntime {
       return {
         output,
         tokensUsed: json?.usage?.total_tokens,
+        tokenUsage: json?.usage
+          ? {
+              promptTokens: json.usage.prompt_tokens,
+              completionTokens: json.usage.completion_tokens,
+              totalTokens: json.usage.total_tokens ?? 0,
+            }
+          : undefined,
         duration: Date.now() - startedAt,
       };
     } catch (error) {

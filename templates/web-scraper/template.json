@@ -1,0 +1,7 @@
+{
+  "id": "web-scraper",
+  "name": "网页抓取",
+  "name_en": "Web Scraper",
+  "description": "从网页抓取内容并进行分析的工作流，支持内容提取和摘要生成。",
+  "description_en": "Workflow for scraping and analyzing web content, with extraction and summarization."
+}

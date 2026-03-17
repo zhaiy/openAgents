@@ -77,3 +77,93 @@ describe('GateManager', () => {
     expect(close).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('GateManager with GateOptions', () => {
+  it('auto-approves when autoApprove option is true', async () => {
+    const manager = new GateManager(undefined, { autoApprove: true });
+    const decision = await manager.handleGate('outline', 'approve', 'content');
+
+    // Should return continue without prompting
+    expect(decision).toEqual({ action: 'continue' });
+  });
+
+  it('auto-approves non-approve gate regardless of options', async () => {
+    const manager = new GateManager(undefined, { autoApprove: false });
+    const decision = await manager.handleGate('outline', 'auto', 'content');
+
+    expect(decision).toEqual({ action: 'continue' });
+  });
+
+  it('behaves normally when no gate options provided', async () => {
+    const question = vi.fn(async () => 'yes');
+    const close = vi.fn();
+    vi.spyOn(readline, 'createInterface').mockReturnValue({
+      question,
+      close,
+    } as unknown as ReturnType<typeof readline.createInterface>);
+
+    const manager = new GateManager(undefined, {});
+    const decision = await manager.handleGate('outline', 'approve', 'content');
+
+    expect(decision).toEqual({ action: 'continue' });
+    expect(question).toHaveBeenCalledTimes(1);
+  });
+
+  it('timeout auto-approves after specified seconds', async () => {
+    vi.useFakeTimers();
+
+    const question = vi.fn(async () => {
+      // Simulate a long wait that should timeout
+      await new Promise(() => {}); // Never resolves
+      return 'no';
+    });
+    const close = vi.fn();
+    vi.spyOn(readline, 'createInterface').mockReturnValue({
+      question,
+      close,
+    } as unknown as ReturnType<typeof readline.createInterface>);
+
+    const manager = new GateManager(undefined, { gateTimeoutSeconds: 5 });
+    const decisionPromise = manager.handleGate('outline', 'approve', 'content');
+
+    // Fast-forward time by 5 seconds
+    await vi.advanceTimersByTimeAsync(5000);
+
+    const decision = await decisionPromise;
+
+    expect(decision).toEqual({ action: 'continue' });
+
+    vi.useRealTimers();
+  });
+
+  it('timeout returns user response if answered before timeout', async () => {
+    vi.useFakeTimers();
+
+    const question = vi.fn(async () => {
+      // Simulate quick response (within 1 second)
+      await vi.advanceTimersByTimeAsync(500);
+      return 'no';
+    });
+    const close = vi.fn();
+    vi.spyOn(readline, 'createInterface').mockReturnValue({
+      question,
+      close,
+    } as unknown as ReturnType<typeof readline.createInterface>);
+
+    const manager = new GateManager(undefined, { gateTimeoutSeconds: 5 });
+    const decision = await manager.handleGate('outline', 'approve', 'content');
+
+    // User responded before timeout, should return abort
+    expect(decision).toEqual({ action: 'abort' });
+
+    vi.useRealTimers();
+  });
+
+  it('autoApprove takes precedence over timeout', async () => {
+    const manager = new GateManager(undefined, { autoApprove: true, gateTimeoutSeconds: 5 });
+    const decision = await manager.handleGate('outline', 'approve', 'content');
+
+    // autoApprove should immediately return without waiting for timeout
+    expect(decision).toEqual({ action: 'continue' });
+  });
+});

@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
-import type { ProjectConfig } from '../types/index.js';
+import type { AgentConfig, ProjectConfig } from '../types/index.js';
 import { createRuntime } from '../runtime/factory.js';
+import { ScriptRuntime } from '../runtime/script.js';
 
 const projectConfig: ProjectConfig = {
   version: '1',
@@ -26,6 +27,28 @@ describe('runtime factory', () => {
     const runtime = createRuntime('llm-direct', projectConfig);
     expect(runtime).toBeTruthy();
     delete process.env.OPENAGENTS_API_KEY;
+  });
+
+  it('creates script runtime with inline script', () => {
+    const agentConfig: AgentConfig = {
+      agent: { id: 'test', name: 'Test', description: 'Test agent' },
+      prompt: { system: 'test' },
+      runtime: { type: 'script', model: '', timeout_seconds: 30 },
+      script: { inline: 'return "hello"' },
+    };
+    const runtime = createRuntime('script', projectConfig, agentConfig);
+    expect(runtime).toBeInstanceOf(ScriptRuntime);
+  });
+
+  it('creates script runtime with script file', () => {
+    const agentConfig: AgentConfig = {
+      agent: { id: 'test', name: 'Test', description: 'Test agent' },
+      prompt: { system: 'test' },
+      runtime: { type: 'script', model: '', timeout_seconds: 30 },
+      script: { file: 'scripts/test.js' },
+    };
+    const runtime = createRuntime('script', projectConfig, agentConfig);
+    expect(runtime).toBeInstanceOf(ScriptRuntime);
   });
 
   it('throws for unsupported runtime', () => {

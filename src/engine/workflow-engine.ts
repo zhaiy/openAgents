@@ -4,6 +4,7 @@ import { ConfigLoader } from '../config/loader.js';
 import { GateRejectError, RuntimeError } from '../errors.js';
 import { EventLogger } from '../output/logger.js';
 import { OutputWriter } from '../output/writer.js';
+import { sendWebhookNotification } from '../output/notifier.js';
 import type {
   AgentConfig,
   AgentRuntime,
@@ -19,8 +20,13 @@ import { Scheduler } from './scheduler.js';
 import { StateManager } from './state.js';
 import { renderTemplate } from './template.js';
 import { ProgressUI } from '../ui/progress.js';
+import { StepCache } from './cache.js';
 
-type RuntimeFactory = (type: RuntimeType, projectConfig: ProjectConfig) => AgentRuntime;
+type RuntimeFactory = (type: RuntimeType, projectConfig: ProjectConfig, agentConfig?: AgentConfig) => AgentRuntime;
+
+interface RunOptions {
+  inputData?: Record<string, unknown>;
+}
 
 interface WorkflowEngineDeps {
   configLoader: ConfigLoader;
@@ -29,6 +35,7 @@ interface WorkflowEngineDeps {
   outputWriter: OutputWriter;
   gateManager: GateManager;
   progressUI: ProgressUI;
+  cache?: StepCache;
 }
 
 function getRuntimeErrorMeta(error: unknown): Record<string, unknown> {
@@ -49,7 +56,7 @@ export class WorkflowEngine {
 
   constructor(private readonly deps: WorkflowEngineDeps) {}
 
-  async run(workflowId: string, input: string): Promise<RunState> {
+  async run(workflowId: string, input: string, options?: RunOptions): Promise<RunState> {
     const projectConfig = this.deps.configLoader.loadProjectConfig();
     const agents = this.deps.configLoader.loadAgents();
     const workflow = this.deps.configLoader.loadWorkflow(workflowId);
@@ -57,7 +64,7 @@ export class WorkflowEngine {
 
     const plan = this.dagParser.parse(workflow.steps);
     const runId = this.deps.stateManager.generateRunId();
-    const state = this.deps.stateManager.initRun(runId, workflow.workflow.id, input, plan.order);
+    const state = this.deps.stateManager.initRun(runId, workflow.workflow.id, input, plan.order, options?.inputData);
     return this.executeWorkflow({
       projectConfig,
       agents,
@@ -201,7 +208,7 @@ export class WorkflowEngine {
     runDir: string;
     logger: EventLogger;
   }): Promise<void> {
-    const { projectConfig, step, logger, state } = params;
+    const { projectConfig, step, logger, state, workflow } = params;
     const retryConfig = step.retry ?? projectConfig.retry;
     const maxAttempts = Math.max(0, retryConfig.max_attempts);
     const delayMs = Math.max(0, retryConfig.delay_seconds) * 1000;
@@ -236,18 +243,114 @@ export class WorkflowEngine {
           await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
           continue;
         }
-        this.deps.stateManager.updateStep(state, step.id, {
-          status: 'failed',
-          completedAt: Date.now(),
-          error: message,
-        });
-        logger.log('step.failed', {
-          stepId: step.id,
-          error: message,
-          ...getRuntimeErrorMeta(error),
-        });
-        this.deps.progressUI.updateStep(step.id, 'failed', { error: message });
-        throw error;
+
+        // All retries exhausted - handle based on on_failure strategy
+        const onFailure = step.on_failure ?? 'fail';
+
+        switch (onFailure) {
+          case 'skip':
+            // Mark as skipped and continue
+            this.deps.stateManager.updateStep(state, step.id, {
+              status: 'skipped',
+              completedAt: Date.now(),
+              error: message,
+            });
+            logger.log('step.skipped', {
+              stepId: step.id,
+              error: message,
+              reason: 'on_failure=skip',
+            });
+            this.deps.progressUI.updateStep(step.id, 'skipped', { error: message });
+            return; // Don't throw, allow workflow to continue
+
+          case 'fallback':
+            // Execute with fallback agent
+            logger.log('step.retrying', {
+              stepId: step.id,
+              attempt: 'fallback',
+              fallbackAgent: step.fallback_agent,
+              error: message,
+            });
+            try {
+              await this.executeStepCore({
+                ...params,
+                step: {
+                  ...step,
+                  agent: step.fallback_agent!,
+                  id: step.id, // Keep original step ID
+                },
+              });
+              return;
+            } catch (fallbackError) {
+              // Fallback also failed, mark as failed
+              const fallbackMessage = fallbackError instanceof Error ? fallbackError.message : 'fallback failed';
+              this.deps.stateManager.updateStep(state, step.id, {
+                status: 'failed',
+                completedAt: Date.now(),
+                error: `Primary: ${message}; Fallback: ${fallbackMessage}`,
+              });
+              logger.log('step.failed', {
+                stepId: step.id,
+                error: `Primary: ${message}; Fallback: ${fallbackMessage}`,
+                ...getRuntimeErrorMeta(fallbackError),
+              });
+              this.deps.progressUI.updateStep(step.id, 'failed', { error: fallbackMessage });
+              throw fallbackError;
+            }
+
+          case 'notify':
+            if (step.notify?.webhook) {
+              await sendWebhookNotification(step.notify.webhook, {
+                workflowId: workflow.workflow.id,
+                runId: state.runId,
+                stepId: step.id,
+                agent: step.agent,
+                error: message,
+                timestamp: Date.now(),
+              });
+            }
+            this.deps.stateManager.updateStep(state, step.id, {
+              status: 'failed',
+              completedAt: Date.now(),
+              error: message,
+            });
+            logger.log('step.failed', {
+              stepId: step.id,
+              error: message,
+              reason: 'on_failure=notify',
+              ...getRuntimeErrorMeta(error),
+            });
+            this.deps.progressUI.updateStep(step.id, 'failed', { error: message });
+            throw error;
+
+          case 'fail':
+          default:
+            // Send webhook notification if configured
+            if (step.notify?.webhook) {
+              await sendWebhookNotification(step.notify.webhook, {
+                workflowId: workflow.workflow.id,
+                runId: state.runId,
+                stepId: step.id,
+                agent: step.agent,
+                error: message,
+                timestamp: Date.now(),
+              });
+            }
+
+            // Mark as failed and throw
+            this.deps.stateManager.updateStep(state, step.id, {
+              status: 'failed',
+              completedAt: Date.now(),
+              error: message,
+            });
+            logger.log('step.failed', {
+              stepId: step.id,
+              error: message,
+              ...getRuntimeErrorMeta(error),
+            });
+            this.deps.progressUI.updateStep(step.id, 'failed', { error: message });
+            throw error;
+        }
       }
     }
   }
@@ -277,6 +380,7 @@ export class WorkflowEngine {
 
     const renderedPrompt = renderTemplate(step.task, {
       input: state.input,
+      inputs: state.inputData,
       workflowId: workflow.workflow.id,
       runId: state.runId,
       runDir,
@@ -285,9 +389,68 @@ export class WorkflowEngine {
       ),
     });
 
-    const runtime = this.deps.runtimeFactory(agent.runtime.type, projectConfig);
+    // Resolve custom filename if configured
+    let customFilename: string | undefined;
+    if (workflow.output.files) {
+      const fileConfig = workflow.output.files.find((f) => f.step === step.id);
+      if (fileConfig) {
+        customFilename = renderTemplate(fileConfig.filename, {
+          input: state.input,
+          inputs: state.inputData,
+          workflowId: workflow.workflow.id,
+          runId: state.runId,
+          runDir,
+          steps: Object.fromEntries(
+            Object.entries(state.steps).map(([stepId, stepState]) => [stepId, { outputFile: stepState.outputFile }]),
+          ),
+        });
+      }
+    }
+
+    const runtime = this.deps.runtimeFactory(agent.runtime.type, projectConfig, agent);
     const model = agent.runtime.model || projectConfig.runtime.default_model;
     const timeoutSeconds = agent.runtime.timeout_seconds || 300;
+
+    // Determine cache settings (step-level overrides workflow-level)
+    const cacheConfig = step.cache ?? workflow.cache;
+    const cacheEnabled = cacheConfig?.enabled ?? false;
+    const cacheTtl = cacheConfig?.ttl ?? 3600;
+
+    // Check cache if enabled
+    if (cacheEnabled && this.deps.cache) {
+      const cacheKey = this.deps.cache.computeKey(step.id, step.agent, renderedPrompt, model);
+      const cached = this.deps.cache.get(cacheKey);
+
+      if (cached) {
+        // Use cached result
+        const outputFile = this.deps.outputWriter.writeStepOutput(runDir, step.id, cached.output, customFilename);
+        const outputFileName = path.basename(outputFile);
+        const durationMs = Date.now() - startedAt;
+
+        this.deps.stateManager.updateStep(state, step.id, {
+          status: 'completed',
+          completedAt: Date.now(),
+          outputFile: outputFileName,
+          tokenUsage: cached.tokenUsage,
+          durationMs,
+        });
+
+        logger.log('step.cached', {
+          stepId: step.id,
+          cached: true,
+          outputFile: outputFileName,
+        });
+
+        const previewLines = projectConfig.output.preview_lines;
+        this.deps.progressUI.updateStep(step.id, 'completed', {
+          duration: durationMs,
+          outputPreview: cached.output.split('\n').slice(0, previewLines).join('\n'),
+          tokenUsage: cached.tokenUsage,
+        });
+
+        return;
+      }
+    }
 
     try {
       const result = await runtime.execute({
@@ -296,22 +459,38 @@ export class WorkflowEngine {
         model,
         timeoutSeconds,
       });
-      const outputFile = this.deps.outputWriter.writeStepOutput(runDir, step.id, result.output);
+
+      // Store in cache if enabled
+      if (cacheEnabled && this.deps.cache) {
+        const cacheKey = this.deps.cache.computeKey(step.id, step.agent, renderedPrompt, model);
+        this.deps.cache.set(cacheKey, {
+          output: result.output,
+          tokenUsage: result.tokenUsage,
+          durationMs: result.duration,
+        }, cacheTtl);
+      }
+
+      const outputFile = this.deps.outputWriter.writeStepOutput(runDir, step.id, result.output, customFilename);
       const outputFileName = path.basename(outputFile);
+      const durationMs = Date.now() - startedAt;
       this.deps.stateManager.updateStep(state, step.id, {
         status: 'completed',
         completedAt: Date.now(),
         outputFile: outputFileName,
+        tokenUsage: result.tokenUsage,
+        durationMs,
       });
       logger.log('step.completed', {
         stepId: step.id,
         duration: result.duration,
         outputFile: outputFileName,
+        tokenUsage: result.tokenUsage,
       });
       const previewLines = projectConfig.output.preview_lines;
       this.deps.progressUI.updateStep(step.id, 'completed', {
-        duration: Date.now() - startedAt,
+        duration: durationMs,
         outputPreview: result.output.split('\n').slice(0, previewLines).join('\n'),
+        tokenUsage: result.tokenUsage,
       });
 
       if (step.gate === 'approve') {
@@ -323,7 +502,7 @@ export class WorkflowEngine {
           throw new GateRejectError(step.id);
         }
         if (decision.action === 'edit') {
-          this.deps.outputWriter.writeStepOutput(runDir, step.id, decision.editedOutput);
+          this.deps.outputWriter.writeStepOutput(runDir, step.id, decision.editedOutput, customFilename);
           logger.log('gate.edited', { stepId: step.id });
         } else {
           logger.log('gate.approved', { stepId: step.id });

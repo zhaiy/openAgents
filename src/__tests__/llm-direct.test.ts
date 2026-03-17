@@ -78,3 +78,99 @@ describe('LLMDirectRuntime error details', () => {
     });
   });
 });
+
+describe('LLMDirectRuntime token usage', () => {
+  it('extracts detailed token usage from response', async () => {
+    globalThis.fetch = vi.fn(async () => {
+      return new Response(
+        JSON.stringify({
+          choices: [{ message: { content: 'Hello world' } }],
+          usage: {
+            prompt_tokens: 100,
+            completion_tokens: 50,
+            total_tokens: 150,
+          },
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      );
+    }) as typeof fetch;
+
+    const runtime = new LLMDirectRuntime({ apiKey: 'test-key', baseUrl: 'https://example.com' });
+    const result = await runtime.execute({
+      systemPrompt: 'sys',
+      userPrompt: 'user',
+      model: 'test-model',
+      timeoutSeconds: 10,
+    });
+
+    expect(result.output).toBe('Hello world');
+    expect(result.tokensUsed).toBe(150);
+    expect(result.tokenUsage).toEqual({
+      promptTokens: 100,
+      completionTokens: 50,
+      totalTokens: 150,
+    });
+  });
+
+  it('handles response without usage field', async () => {
+    globalThis.fetch = vi.fn(async () => {
+      return new Response(
+        JSON.stringify({
+          choices: [{ message: { content: 'No usage info' } }],
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      );
+    }) as typeof fetch;
+
+    const runtime = new LLMDirectRuntime({ apiKey: 'test-key', baseUrl: 'https://example.com' });
+    const result = await runtime.execute({
+      systemPrompt: 'sys',
+      userPrompt: 'user',
+      model: 'test-model',
+      timeoutSeconds: 10,
+    });
+
+    expect(result.output).toBe('No usage info');
+    expect(result.tokensUsed).toBeUndefined();
+    expect(result.tokenUsage).toBeUndefined();
+  });
+
+  it('handles partial usage fields', async () => {
+    globalThis.fetch = vi.fn(async () => {
+      return new Response(
+        JSON.stringify({
+          choices: [{ message: { content: 'Partial usage' } }],
+          usage: {
+            total_tokens: 200,
+          },
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      );
+    }) as typeof fetch;
+
+    const runtime = new LLMDirectRuntime({ apiKey: 'test-key', baseUrl: 'https://example.com' });
+    const result = await runtime.execute({
+      systemPrompt: 'sys',
+      userPrompt: 'user',
+      model: 'test-model',
+      timeoutSeconds: 10,
+    });
+
+    expect(result.output).toBe('Partial usage');
+    expect(result.tokensUsed).toBe(200);
+    expect(result.tokenUsage).toEqual({
+      promptTokens: undefined,
+      completionTokens: undefined,
+      totalTokens: 200,
+    });
+  });
+});

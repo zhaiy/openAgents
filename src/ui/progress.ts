@@ -3,12 +3,13 @@ import chalk from 'chalk';
 import ora, { type Ora } from 'ora';
 
 import { getDefaultLocale, t, type Locale } from '../i18n/index.js';
-import type { ExecutionPlan, RunState, StepStatus } from '../types/index.js';
+import type { ExecutionPlan, RunState, StepStatus, TokenUsage } from '../types/index.js';
 
 interface StepDetail {
   duration?: number;
   outputPreview?: string;
   error?: string;
+  tokenUsage?: TokenUsage;
 }
 
 export class ProgressUI {
@@ -67,7 +68,9 @@ export class ProgressUI {
 
     if (status === 'completed') {
       const duration = detail?.duration ? ` (${Math.round(detail.duration / 1000)}s)` : '';
-      console.log(chalk.green(`✅ ${t(this.locale, 'progressStepCompleted', { prefix })}${duration}`));
+      const tokens = detail?.tokenUsage?.totalTokens ?? 0;
+      const tokenStr = tokens > 0 ? `, ${tokens.toLocaleString()} tokens` : '';
+      console.log(chalk.green(`✅ ${t(this.locale, 'progressStepCompleted', { prefix })}${duration}${tokenStr}`));
       if (detail?.outputPreview) {
         console.log(
           boxen(detail.outputPreview, {
@@ -122,6 +125,38 @@ export class ProgressUI {
   }
 
   complete(state: RunState): void {
+    // Calculate totals
+    let totalTokens = 0;
+    let totalDurationMs = 0;
+    const stepSummaries: string[] = [];
+
+    for (const [stepId, step] of Object.entries(state.steps)) {
+      const index = this.stepIndexById.get(stepId) ?? 0;
+      const prefix = `[${index}/${this.totalSteps}]`;
+      const statusIcon = step.status === 'completed' ? '✅' : step.status === 'failed' ? '❌' : '⚠️';
+      const duration = step.durationMs ? `${Math.round(step.durationMs / 1000)}s` : '-';
+      const tokens = step.tokenUsage?.totalTokens ?? 0;
+      totalTokens += tokens;
+      totalDurationMs += step.durationMs ?? 0;
+      const tokenStr = tokens > 0 ? `, ${tokens.toLocaleString()} tokens` : '';
+      stepSummaries.push(`  ${statusIcon} ${prefix} ${stepId} (${duration}${tokenStr})`);
+    }
+
+    // Print step summaries
+    if (stepSummaries.length > 0) {
+      console.log('\n' + stepSummaries.join('\n'));
+    }
+
+    // Print totals
+    const totalDurationSec = Math.round(totalDurationMs / 1000);
+    const totalDurationStr =
+      totalDurationSec >= 60
+        ? `${Math.floor(totalDurationSec / 60)}m ${totalDurationSec % 60}s`
+        : `${totalDurationSec}s`;
+    console.log(
+      chalk.cyan(`\n📊 ${t(this.locale, 'progressSummaryTotal', { duration: totalDurationStr, tokens: totalTokens.toLocaleString() })}`),
+    );
+
     console.log(
       chalk.green(
         `\n${t(this.locale, 'progressWorkflowFinished', {

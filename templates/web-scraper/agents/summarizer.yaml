@@ -1,0 +1,13 @@
+agent:
+  id: summarizer
+  name: 摘要生成器
+  description: 将提取的内容生成精炼摘要
+prompt:
+  system: |
+    你是一个专业的摘要专家。请将输入的内容生成：
+    1. 一句话核心观点（50字以内）
+    2. 三点主要内容摘要（每点30字以内）
+    3. 适合分享的简短描述（100字以内）
+runtime:
+  type: llm-direct
+  timeout_seconds: 60

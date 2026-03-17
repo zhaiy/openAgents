@@ -9,7 +9,9 @@ import { WorkflowEngine } from '../engine/workflow-engine.js';
 import { getDefaultLocale, resolveLocale, type Locale } from '../i18n/index.js';
 import { OutputWriter } from '../output/writer.js';
 import { createRuntime } from '../runtime/factory.js';
+import type { GateOptions } from '../types/index.js';
 import { ProgressUI } from '../ui/progress.js';
+import { StepCache } from '../engine/cache.js';
 
 export interface AppContext {
   projectRoot: string;
@@ -18,7 +20,7 @@ export interface AppContext {
   engine: WorkflowEngine;
 }
 
-export function buildAppContext(locale?: Locale): AppContext {
+export function buildAppContext(locale?: Locale, gateOptions?: GateOptions): AppContext {
   const projectRoot = process.cwd();
   const loader = new ConfigLoader(projectRoot);
   const projectConfig = loader.loadProjectConfig();
@@ -26,8 +28,9 @@ export function buildAppContext(locale?: Locale): AppContext {
   const stateManager = new StateManager(outputBaseDir);
   const outputWriter = new OutputWriter();
   const resolvedLocale = locale ?? getDefaultLocale();
-  const gateManager = new GateManager(resolvedLocale);
+  const gateManager = new GateManager(resolvedLocale, gateOptions);
   const progressUI = new ProgressUI(resolvedLocale);
+  const cache = new StepCache(path.join(outputBaseDir, '.cache'));
 
   const engine = new WorkflowEngine({
     configLoader: loader,
@@ -36,6 +39,7 @@ export function buildAppContext(locale?: Locale): AppContext {
     outputWriter,
     gateManager,
     progressUI,
+    cache,
   });
 
   return { projectRoot, loader, stateManager, engine };

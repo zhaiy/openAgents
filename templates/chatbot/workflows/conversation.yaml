@@ -1,0 +1,15 @@
+workflow:
+  id: conversation
+  name: 对话工作流
+  description: 简单的单轮对话示例
+
+steps:
+  - id: respond
+    agent: chatbot
+    task: |
+      用户说：{{input}}
+
+      请给出友好的回复。
+
+output:
+  directory: ./output/{{workflow.id}}/{{run.id}}

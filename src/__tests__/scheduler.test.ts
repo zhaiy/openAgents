@@ -62,4 +62,28 @@ describe('Scheduler', () => {
     await expect(scheduler.run()).rejects.toThrow('fail');
     expect(executedB).toBe(false);
   });
+
+  it('treats skipped dependency as satisfied', async () => {
+    const plan: ExecutionPlan = {
+      nodes: [
+        { id: 'a', dependencies: [] },
+        { id: 'b', dependencies: ['a'] },
+      ],
+      order: ['a', 'b'],
+      parallelGroups: [['a'], ['b']],
+    };
+    const state = makeState(['a', 'b']);
+
+    const scheduler = new Scheduler(plan, state, async (stepId) => {
+      if (stepId === 'a') {
+        state.steps.a = { ...state.steps.a, status: 'skipped', completedAt: Date.now() };
+        return;
+      }
+      state.steps.b = { ...state.steps.b, status: 'completed', completedAt: Date.now() };
+    });
+
+    await expect(scheduler.run()).resolves.toBeUndefined();
+    expect(state.steps.a.status).toBe('skipped');
+    expect(state.steps.b.status).toBe('completed');
+  });
 });

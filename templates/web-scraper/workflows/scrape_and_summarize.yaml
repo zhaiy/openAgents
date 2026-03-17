@@ -1,0 +1,24 @@
+workflow:
+  id: scrape_and_summarize
+  name: 抓取并摘要
+  description: 从网页内容中提取信息并生成摘要
+
+steps:
+  - id: extract
+    agent: content_extractor
+    task: |
+      请从以下网页内容中提取关键信息：
+
+      {{input}}
+    gate: approve
+
+  - id: summarize
+    agent: summarizer
+    depends_on: [extract]
+    task: |
+      请为以下提取的内容生成摘要：
+
+      {{steps.extract.output}}
+
+output:
+  directory: ./output/{{workflow.id}}/{{run.id}}

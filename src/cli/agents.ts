@@ -35,7 +35,7 @@ export function createAgentsCommand(): Command {
               pad(agent.agent.id, 12),
               pad(agent.agent.name, 24),
               pad(agent.runtime.type, 14),
-              pad(agent.runtime.model, 20),
+              pad(agent.runtime.model ?? '-', 20),
             ].join(' '),
           );
         }

@@ -1,0 +1,7 @@
+{
+  "id": "chatbot",
+  "name": "聊天机器人",
+  "name_en": "Chatbot",
+  "description": "简单的对话机器人工作流，支持多轮对话和上下文记忆。",
+  "description_en": "Simple conversational chatbot workflow with multi-turn dialogue and context memory."
+}
