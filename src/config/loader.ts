@@ -29,6 +29,10 @@ function parseYamlFile(filePath: string): unknown {
 export class ConfigLoader {
   constructor(private readonly projectRoot: string) {}
 
+  getProjectRoot(): string {
+    return this.projectRoot;
+  }
+
   loadProjectConfig(): ProjectConfig {
     const filePath = path.join(this.projectRoot, 'openagents.yaml');
     if (!fs.existsSync(filePath)) {

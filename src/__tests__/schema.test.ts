@@ -224,6 +224,56 @@ describe('schema validation', () => {
     });
   });
 
+  describe('post_processors config', () => {
+    it('accepts script post_processor with required fields', () => {
+      const result = WorkflowConfigSchema.safeParse({
+        workflow: { id: 'novel_writing', name: 'Novel', description: 'desc' },
+        steps: [
+          {
+            id: 'chapter',
+            agent: 'writer',
+            task: 'task',
+            post_processors: [{ type: 'script', command: 'node scripts/shrink.mjs' }],
+          },
+        ],
+        output: { directory: './output' },
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it('rejects script post_processor without command', () => {
+      const result = WorkflowConfigSchema.safeParse({
+        workflow: { id: 'novel_writing', name: 'Novel', description: 'desc' },
+        steps: [
+          {
+            id: 'chapter',
+            agent: 'writer',
+            task: 'task',
+            post_processors: [{ type: 'script', command: '' }],
+          },
+        ],
+        output: { directory: './output' },
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it('rejects invalid post_processor on_error value', () => {
+      const result = WorkflowConfigSchema.safeParse({
+        workflow: { id: 'novel_writing', name: 'Novel', description: 'desc' },
+        steps: [
+          {
+            id: 'chapter',
+            agent: 'writer',
+            task: 'task',
+            post_processors: [{ type: 'script', command: 'node script.js', on_error: 'ignore' }],
+          },
+        ],
+        output: { directory: './output' },
+      });
+      expect(result.success).toBe(false);
+    });
+  });
+
   describe('on_failure config', () => {
     it('accepts step with on_failure=fail', () => {
       const result = WorkflowConfigSchema.safeParse({

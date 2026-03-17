@@ -44,6 +44,18 @@ export interface GateOptions {
   gateTimeoutSeconds?: number;
 }
 
+export type PostProcessorType = 'script';
+export type PostProcessorErrorMode = 'fail' | 'skip' | 'passthrough';
+
+export interface ScriptPostProcessorConfig {
+  type: PostProcessorType;
+  name?: string;
+  command: string;
+  timeout_ms?: number;
+  max_output_chars?: number;
+  on_error?: PostProcessorErrorMode;
+}
+
 export interface StepConfig {
   id: string;
   agent: string;
@@ -55,6 +67,7 @@ export interface StepConfig {
   on_failure?: OnFailureAction;
   fallback_agent?: string;
   notify?: NotifyConfig;
+  post_processors?: ScriptPostProcessorConfig[];
 }
 
 export interface OutputFileConfig {

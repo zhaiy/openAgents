@@ -1,6 +1,19 @@
 import { z } from 'zod';
 
-import type { AgentConfig, CacheConfig, NotifyConfig, OnFailureAction, OutputFileConfig, ProjectConfig, RetryConfig, RuntimeType, StepConfig, WorkflowConfig } from '../types/index.js';
+import type {
+  AgentConfig,
+  CacheConfig,
+  NotifyConfig,
+  OnFailureAction,
+  OutputFileConfig,
+  PostProcessorErrorMode,
+  ProjectConfig,
+  RetryConfig,
+  RuntimeType,
+  ScriptPostProcessorConfig,
+  StepConfig,
+  WorkflowConfig,
+} from '../types/index.js';
 
 const idRegex = /^[a-z][a-z0-9_-]*$/;
 
@@ -23,6 +36,17 @@ const NotifyConfigSchema = z.object({
   webhook: z.string().url().optional(),
 }) satisfies z.ZodType<NotifyConfig>;
 
+const PostProcessorErrorModeSchema = z.enum(['fail', 'skip', 'passthrough']) satisfies z.ZodType<PostProcessorErrorMode>;
+
+const ScriptPostProcessorConfigSchema = z.object({
+  type: z.literal('script'),
+  name: z.string().min(1).optional(),
+  command: z.string().min(1),
+  timeout_ms: z.number().int().positive().optional(),
+  max_output_chars: z.number().int().positive().optional(),
+  on_error: PostProcessorErrorModeSchema.optional(),
+}) satisfies z.ZodType<ScriptPostProcessorConfig>;
+
 const OutputFileConfigSchema = z.object({
   step: z.string().regex(idRegex, 'must start with lowercase letter and only contain a-z, 0-9, _ or -'),
   filename: z.string().min(1),
@@ -39,6 +63,7 @@ const StepConfigSchemaBase = z.object({
   on_failure: OnFailureActionSchema.optional(),
   fallback_agent: z.string().regex(idRegex).optional(),
   notify: NotifyConfigSchema.optional(),
+  post_processors: z.array(ScriptPostProcessorConfigSchema).optional(),
 }).superRefine((step, ctx) => {
   if (step.on_failure === 'fallback' && !step.fallback_agent) {
     ctx.addIssue({

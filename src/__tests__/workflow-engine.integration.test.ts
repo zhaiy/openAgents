@@ -282,4 +282,184 @@ output:
     expect(run.steps.precheck.status).toBe('failed');
     expect(run.steps.main.status).toBe('pending');
   });
+
+  it('applies script post_processor output before writing step file', async () => {
+    const root = createTempProject();
+    write(
+      path.join(root, 'agents/writer.yaml'),
+      `agent:
+  id: writer
+  name: Writer
+  description: succeeds
+prompt:
+  system: write
+runtime:
+  type: llm-direct
+  model: qwen-plus
+  timeout_seconds: 5
+`,
+    );
+    write(
+      path.join(root, 'scripts/shrink.mjs'),
+      `import { stdin, stdout } from 'node:process';
+let data = '';
+stdin.setEncoding('utf8');
+stdin.on('data', (chunk) => { data += chunk; });
+stdin.on('end', () => {
+  stdout.write(data.slice(0, 4));
+});
+`,
+    );
+    write(
+      path.join(root, 'workflows/demo.yaml'),
+      `workflow:
+  id: demo
+  name: Demo
+  description: test post processors
+steps:
+  - id: write
+    agent: writer
+    task: produce content
+    post_processors:
+      - type: script
+        command: node scripts/shrink.mjs
+output:
+  directory: ./output
+`,
+    );
+
+    const runtimeFactory = (): AgentRuntime => ({
+      execute: async (): Promise<ExecuteResult> => ({ output: 'abcdefghij', duration: 1 }),
+    });
+    const { engine, stateManager } = createEngine(root, runtimeFactory);
+
+    const state = await engine.run('demo', 'input');
+    expect(state.status).toBe('completed');
+    expect(state.steps.write.status).toBe('completed');
+
+    const [run] = stateManager.listRuns({ workflowId: 'demo' });
+    const outputPath = path.join(stateManager.getRunDir('demo', run.runId), run.steps.write.outputFile!);
+    expect(fs.readFileSync(outputPath, 'utf8')).toBe('abcd');
+  });
+
+  it('keeps original output when post_processor fails with on_error=skip', async () => {
+    const root = createTempProject();
+    write(
+      path.join(root, 'agents/writer.yaml'),
+      `agent:
+  id: writer
+  name: Writer
+  description: succeeds
+prompt:
+  system: write
+runtime:
+  type: llm-direct
+  model: qwen-plus
+  timeout_seconds: 5
+`,
+    );
+    write(
+      path.join(root, 'scripts/fail.mjs'),
+      `process.exit(1);
+`,
+    );
+    write(
+      path.join(root, 'workflows/demo.yaml'),
+      `workflow:
+  id: demo
+  name: Demo
+  description: test post processors
+steps:
+  - id: write
+    agent: writer
+    task: produce content
+    post_processors:
+      - type: script
+        command: node scripts/fail.mjs
+        on_error: skip
+output:
+  directory: ./output
+`,
+    );
+
+    const runtimeFactory = (): AgentRuntime => ({
+      execute: async (): Promise<ExecuteResult> => ({ output: 'original-output', duration: 1 }),
+    });
+    const { engine, stateManager } = createEngine(root, runtimeFactory);
+
+    const state = await engine.run('demo', 'input');
+    expect(state.status).toBe('completed');
+    expect(state.steps.write.status).toBe('completed');
+
+    const [run] = stateManager.listRuns({ workflowId: 'demo' });
+    const outputPath = path.join(stateManager.getRunDir('demo', run.runId), run.steps.write.outputFile!);
+    expect(fs.readFileSync(outputPath, 'utf8')).toBe('original-output');
+  });
+
+  it('passthrough returns original output and stops processor chain', async () => {
+    const root = createTempProject();
+    write(
+      path.join(root, 'agents/writer.yaml'),
+      `agent:
+  id: writer
+  name: Writer
+  description: succeeds
+prompt:
+  system: write
+runtime:
+  type: llm-direct
+  model: qwen-plus
+  timeout_seconds: 5
+`,
+    );
+    write(
+      path.join(root, 'scripts/fail.mjs'),
+      `process.exit(1);
+`,
+    );
+    write(
+      path.join(root, 'scripts/append.mjs'),
+      `import { stdin, stdout } from 'node:process';
+let data = '';
+stdin.setEncoding('utf8');
+stdin.on('data', (chunk) => { data += chunk; });
+stdin.on('end', () => {
+  stdout.write(data + '-changed');
+});
+`,
+    );
+    write(
+      path.join(root, 'workflows/demo.yaml'),
+      `workflow:
+  id: demo
+  name: Demo
+  description: test post processors
+steps:
+  - id: write
+    agent: writer
+    task: produce content
+    post_processors:
+      - type: script
+        command: node scripts/fail.mjs
+        on_error: passthrough
+      - type: script
+        command: node scripts/append.mjs
+output:
+  directory: ./output
+`,
+    );
+
+    const runtimeFactory = (): AgentRuntime => ({
+      execute: async (): Promise<ExecuteResult> => ({ output: 'original', duration: 1 }),
+    });
+    const { engine, stateManager } = createEngine(root, runtimeFactory);
+
+    const state = await engine.run('demo', 'input');
+    expect(state.status).toBe('completed');
+    expect(state.steps.write.status).toBe('completed');
+
+    const [run] = stateManager.listRuns({ workflowId: 'demo' });
+    const outputPath = path.join(stateManager.getRunDir('demo', run.runId), run.steps.write.outputFile!);
+    expect(fs.readFileSync(outputPath, 'utf8')).toBe('original');
+  });
 });

@@ -13,6 +13,13 @@ steps:
       3. 章节规划（5章，每章一句话概述）
 
       主题：{{input}}
+    post_processors:
+      - type: script
+        name: shrink_outline
+        command: node scripts/shrink-context.mjs
+        timeout_ms: 5000
+        max_output_chars: 6000
+        on_error: fail
     gate: approve
 
   - id: chapter_1

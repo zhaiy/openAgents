@@ -20,6 +20,7 @@
 - DAG 并行调度与可配置重试机制
 - 结构化输入（`--input-json`、`--input-file`）与 `{{inputs.xxx}}` 模板变量
 - Script Runtime（`runtime.type: script`）支持本地脚本预处理
+- 步骤后置处理器（`step.post_processors`）支持用户自定义输出精简
 - 步骤缓存（`workflow.cache` / `step.cache`）与 `openagents cache` 管理命令
 - 开发者工具：`openagents debug template`、`openagents dag`、`openagents validate --verbose`
 
@@ -70,6 +71,78 @@ openagents cache clear
 - `on_failure: skip`：当前步骤标记为跳过，继续执行后续可运行步骤。
 - `on_failure: fallback`：使用 `fallback_agent` 进行兜底执行。
 - `on_failure: notify`：先发送 `notify.webhook`，再将步骤与运行标记为失败。
+
+## 步骤后置处理器（脚本）
+
+你可以在 step 上配置 `post_processors`，在步骤输出写盘和传递给下游之前做自定义处理。
+
+```yaml
+steps:
+  - id: load_context
+    agent: planner
+    task: "生成较长上下文"
+    post_processors:
+      - type: script
+        name: shrink_context
+        command: node scripts/shrink-context.mjs
+        timeout_ms: 5000
+        max_output_chars: 20000
+        on_error: fail # fail | skip | passthrough
+```
+
+脚本协议：
+
+- 输入：引擎通过 `stdin` 传入原始步骤输出（UTF-8 文本）
+- 输出：脚本通过 `stdout` 输出处理结果
+- 日志：`stderr` 仅用于日志，不参与数据传递
+- 退出码：`0` 表示成功，非 `0` 表示失败
+- 环境变量：`OA_RUN_ID`、`OA_WORKFLOW_ID`、`OA_STEP_ID`、`OA_PROCESSOR_NAME`
+
+`on_error` 行为：
+
+- `fail`（默认）：当前步骤失败。
+- `skip`：跳过该处理器，继续后续处理链。
+- `passthrough`：停止处理链并透传 agent 原始输出。
+
+最佳实践：
+
+- 脚本应尽量保持幂等和确定性：相同输入得到相同输出。
+- 脚本尽量轻量，避免在处理链路中依赖外部网络调用。
+- 严格流程建议使用 `on_error: fail`，容错流程可考虑 `passthrough`。
+- 建议始终设置 `timeout_ms` 与 `max_output_chars` 作为资源上限。
+- 调试信息写入 `stderr`，仅将最终处理结果写入 `stdout`。
+- 生产环境将脚本视为可信代码资产，按应用代码标准进行评审与审计。
+
+推荐目录结构：
+
+```text
+your-project/
+  scripts/
+    post-processors/
+      normalize-output.mjs
+      trim-context.mjs
+      redact-sensitive.mjs
+```
+
+多处理器链路示例：
+
+```yaml
+steps:
+  - id: load_context
+    agent: planner
+    task: "生成上下文内容"
+    post_processors:
+      - type: script
+        name: normalize
+        command: node scripts/post-processors/normalize-output.mjs
+        on_error: fail
+      - type: script
+        name: trim
+        command: node scripts/post-processors/trim-context.mjs
+        timeout_ms: 3000
+        max_output_chars: 8000
+        on_error: passthrough
+```
 
 ## 项目结构
 

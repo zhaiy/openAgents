@@ -20,6 +20,7 @@ Transparent and controllable multi-agent orchestration engine.
 - Parallel DAG scheduling and configurable retry strategy
 - Structured inputs (`--input-json`, `--input-file`) with `{{inputs.xxx}}`
 - Script runtime (`runtime.type: script`) for local preprocessing
+- Step post-processors (`step.post_processors`) for user-defined output filtering
 - Step cache (`workflow.cache` / `step.cache`) and `openagents cache` commands
 - Developer tools: `openagents debug template`, `openagents dag`, `openagents validate --verbose`
 
@@ -70,6 +71,78 @@ openagents cache clear
 - `on_failure: skip`: mark current step as skipped and continue downstream.
 - `on_failure: fallback`: retry with `fallback_agent`.
 - `on_failure: notify`: send `notify.webhook` then fail.
+
+## Step Post-Processors (Script)
+
+Use `post_processors` on a step to transform the step output before it is written and passed downstream.
+
+```yaml
+steps:
+  - id: load_context
+    agent: planner
+    task: "Generate a long context"
+    post_processors:
+      - type: script
+        name: shrink_context
+        command: node scripts/shrink-context.mjs
+        timeout_ms: 5000
+        max_output_chars: 20000
+        on_error: fail # fail | skip | passthrough
+```
+
+Script contract:
+
+- Input: raw step output via `stdin` (UTF-8 text)
+- Output: processed content via `stdout`
+- Logs: `stderr` is for logging only
+- Exit code `0` means success, non-zero means failure
+- Available env vars: `OA_RUN_ID`, `OA_WORKFLOW_ID`, `OA_STEP_ID`, `OA_PROCESSOR_NAME`
+
+`on_error` behavior:
+
+- `fail` (default): fail current step.
+- `skip`: skip this processor and continue with the current output.
+- `passthrough`: stop the processor chain and return original output from the agent.
+
+Best practices:
+
+- Keep scripts idempotent and deterministic; same input should produce same output.
+- Keep scripts lightweight; avoid external network dependencies in processing path.
+- Prefer `on_error: fail` for strict workflows, `passthrough` for best-effort cleanup.
+- Always bound execution with `timeout_ms` and `max_output_chars`.
+- Log diagnostics to `stderr`, keep only final transformed payload in `stdout`.
+- Treat scripts as trusted code in production and review them like application code.
+
+Recommended layout:
+
+```text
+your-project/
+  scripts/
+    post-processors/
+      normalize-output.mjs
+      trim-context.mjs
+      redact-sensitive.mjs
+```
+
+Multi-processor chain example:
+
+```yaml
+steps:
+  - id: load_context
+    agent: planner
+    task: "Generate context data"
+    post_processors:
+      - type: script
+        name: normalize
+        command: node scripts/post-processors/normalize-output.mjs
+        on_error: fail
+      - type: script
+        name: trim
+        command: node scripts/post-processors/trim-context.mjs
+        timeout_ms: 3000
+        max_output_chars: 8000
+        on_error: passthrough
+```
 
 ## Project Layout
 

@@ -21,6 +21,7 @@ import { StateManager } from './state.js';
 import { renderTemplate } from './template.js';
 import { ProgressUI } from '../ui/progress.js';
 import { StepCache } from './cache.js';
+import { runScriptPostProcessor } from './post-processor.js';
 
 type RuntimeFactory = (type: RuntimeType, projectConfig: ProjectConfig, agentConfig?: AgentConfig) => AgentRuntime;
 
@@ -410,6 +411,8 @@ export class WorkflowEngine {
     const runtime = this.deps.runtimeFactory(agent.runtime.type, projectConfig, agent);
     const model = agent.runtime.model || projectConfig.runtime.default_model;
     const timeoutSeconds = agent.runtime.timeout_seconds || 300;
+    const postProcessorSalt = step.post_processors?.length ? `\n__post_processors__:${JSON.stringify(step.post_processors)}` : '';
+    const cachePrompt = `${renderedPrompt}${postProcessorSalt}`;
 
     // Determine cache settings (step-level overrides workflow-level)
     const cacheConfig = step.cache ?? workflow.cache;
@@ -418,7 +421,7 @@ export class WorkflowEngine {
 
     // Check cache if enabled
     if (cacheEnabled && this.deps.cache) {
-      const cacheKey = this.deps.cache.computeKey(step.id, step.agent, renderedPrompt, model);
+      const cacheKey = this.deps.cache.computeKey(step.id, step.agent, cachePrompt, model);
       const cached = this.deps.cache.get(cacheKey);
 
       if (cached) {
@@ -459,18 +462,19 @@ export class WorkflowEngine {
         model,
         timeoutSeconds,
       });
+      const finalOutput = await this.applyPostProcessors(result.output, step, state, workflow);
 
       // Store in cache if enabled
       if (cacheEnabled && this.deps.cache) {
-        const cacheKey = this.deps.cache.computeKey(step.id, step.agent, renderedPrompt, model);
+        const cacheKey = this.deps.cache.computeKey(step.id, step.agent, cachePrompt, model);
         this.deps.cache.set(cacheKey, {
-          output: result.output,
+          output: finalOutput,
           tokenUsage: result.tokenUsage,
           durationMs: result.duration,
         }, cacheTtl);
       }
 
-      const outputFile = this.deps.outputWriter.writeStepOutput(runDir, step.id, result.output, customFilename);
+      const outputFile = this.deps.outputWriter.writeStepOutput(runDir, step.id, finalOutput, customFilename);
       const outputFileName = path.basename(outputFile);
       const durationMs = Date.now() - startedAt;
       this.deps.stateManager.updateStep(state, step.id, {
@@ -489,14 +493,14 @@ export class WorkflowEngine {
       const previewLines = projectConfig.output.preview_lines;
       this.deps.progressUI.updateStep(step.id, 'completed', {
         duration: durationMs,
-        outputPreview: result.output.split('\n').slice(0, previewLines).join('\n'),
+        outputPreview: finalOutput.split('\n').slice(0, previewLines).join('\n'),
         tokenUsage: result.tokenUsage,
       });
 
       if (step.gate === 'approve') {
         logger.log('gate.waiting', { stepId: step.id, gateType: 'approve' });
-        this.deps.progressUI.showGatePrompt(step.id, result.output, previewLines);
-        const decision = await this.deps.gateManager.handleGate(step.id, 'approve', result.output);
+        this.deps.progressUI.showGatePrompt(step.id, finalOutput, previewLines);
+        const decision = await this.deps.gateManager.handleGate(step.id, 'approve', finalOutput);
         if (decision.action === 'abort') {
           logger.log('gate.rejected', { stepId: step.id });
           throw new GateRejectError(step.id);
@@ -518,5 +522,43 @@ export class WorkflowEngine {
       const message = error instanceof Error ? error.message : 'unknown runtime error';
       throw new RuntimeError(message, step.id);
     }
+  }
+
+  private async applyPostProcessors(
+    output: string,
+    step: StepConfig,
+    state: RunState,
+    workflow: WorkflowConfig,
+  ): Promise<string> {
+    if (!step.post_processors?.length) {
+      return output;
+    }
+
+    const originalOutput = output;
+    let currentOutput = output;
+    const projectRoot = this.deps.configLoader.getProjectRoot();
+
+    for (const [index, processor] of step.post_processors.entries()) {
+      try {
+        currentOutput = await runScriptPostProcessor(currentOutput, processor, index, {
+          cwd: projectRoot,
+          runId: state.runId,
+          workflowId: workflow.workflow.id,
+          stepId: step.id,
+        });
+      } catch (error) {
+        const mode = processor.on_error ?? 'fail';
+        const message = error instanceof Error ? error.message : 'post-processor failed';
+        if (mode === 'skip') {
+          continue;
+        }
+        if (mode === 'passthrough') {
+          return originalOutput;
+        }
+        throw new RuntimeError(message, step.id);
+      }
+    }
+
+    return currentOutput;
   }
 }
