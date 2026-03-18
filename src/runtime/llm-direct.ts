@@ -54,11 +54,8 @@ export class LLMDirectRuntime implements AgentRuntime {
     const timeoutMs = params.timeoutSeconds * 1000;
     const timer = setTimeout(() => controller.abort(), timeoutMs);
 
-    // Resolve API URL: use baseUrl directly if it already contains /chat/completions
-    const url = this.baseUrl ;
-    // .includes('/chat/completions')
-    //   ? this.baseUrl
-    //   : `${this.baseUrl}/v1/chat/completions`;
+    // Use the baseUrl as-is without any automatic concatenation
+    const url = this.baseUrl;
 
     try {
       const response = await fetch(url, {
