@@ -8,6 +8,8 @@ interface TemplateContext {
   workflowId: string;
   runId: string;
   runDir: string;
+  processedContexts?: Record<string, string>;
+  skills?: Record<string, { instructions: string; output_format?: string }>;
 }
 
 function resolveRunOutputPath(runDir: string, outputFile: string): string {
@@ -75,6 +77,34 @@ export function renderTemplate(template: string, context: TemplateContext): stri
         throw new Error(`Cannot resolve template variable {{${expr}}}: file "${outputFile}" not found`);
       }
       return fs.readFileSync(outputPath, 'utf8');
+    }
+
+    const contextMatch = expr.match(/^context\.([a-z][a-z0-9_-]*)$/);
+    if (contextMatch) {
+      const stepId = contextMatch[1];
+      const processedContent = context.processedContexts?.[stepId];
+      if (processedContent === undefined) {
+        throw new Error(`Cannot resolve template variable {{${expr}}}: no processed context for step "${stepId}"`);
+      }
+      return processedContent;
+    }
+
+    const skillsInstructionsMatch = expr.match(/^skills\.([a-z][a-z0-9_-]*)\.instructions$/);
+    if (skillsInstructionsMatch) {
+      const skillId = skillsInstructionsMatch[1];
+      if (!context.skills?.[skillId]) {
+        throw new Error(`Cannot resolve template variable {{${expr}}}: skill "${skillId}" not found`);
+      }
+      return context.skills[skillId].instructions;
+    }
+
+    const skillsOutputFormatMatch = expr.match(/^skills\.([a-z][a-z0-9_-]*)\.output_format$/);
+    if (skillsOutputFormatMatch) {
+      const skillId = skillsOutputFormatMatch[1];
+      if (!context.skills?.[skillId]) {
+        throw new Error(`Cannot resolve template variable {{${expr}}}: skill "${skillId}" not found`);
+      }
+      return context.skills[skillId].output_format ?? '';
     }
 
     throw new Error(`Unknown template variable: {{${expr}}}`);

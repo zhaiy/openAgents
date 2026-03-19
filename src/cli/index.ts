@@ -23,6 +23,8 @@ import { createWorkflowsCommand } from './workflows.js';
 import { createDebugCommand } from './debug.js';
 import { createDagCommand } from './dag.js';
 import { createCacheCommand } from './cache.js';
+import { createEvalCommand } from './eval.js';
+import { createAnalyzeCommand } from './analyze.js';
 
 const program = new Command();
 
@@ -37,6 +39,8 @@ program
 program.addCommand(createRunCommand());
 program.addCommand(createResumeCommand());
 program.addCommand(createRunsCommand());
+program.addCommand(createEvalCommand());
+program.addCommand(createAnalyzeCommand());
 program.addCommand(createInitCommand());
 program.addCommand(createValidateCommand());
 program.addCommand(createAgentsCommand());

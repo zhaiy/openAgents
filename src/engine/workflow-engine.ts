@@ -1,32 +1,40 @@
+import fs from 'node:fs';
 import path from 'node:path';
 
 import { ConfigLoader } from '../config/loader.js';
-import { GateRejectError, RuntimeError } from '../errors.js';
+import { GateRejectError, RuntimeError, WorkflowInterruptError } from '../errors.js';
 import { EventLogger } from '../output/logger.js';
 import { OutputWriter } from '../output/writer.js';
 import { sendWebhookNotification } from '../output/notifier.js';
-import type {
-  AgentConfig,
-  AgentRuntime,
-  ProjectConfig,
-  RunState,
-  RuntimeType,
-  StepConfig,
-  WorkflowConfig,
-} from '../types/index.js';
+import type { AgentConfig, AgentRuntime, ProjectConfig, RunState, RuntimeType, StepConfig, WorkflowConfig } from '../types/index.js';
+import { processContext } from './context-processor.js';
 import { GateManager } from './gate.js';
 import { DAGParser } from './dag.js';
 import { Scheduler } from './scheduler.js';
 import { StateManager } from './state.js';
 import { renderTemplate } from './template.js';
-import { ProgressUI } from '../ui/progress.js';
+import type { EngineEventHandler } from './events.js';
 import { StepCache } from './cache.js';
 import { runScriptPostProcessor } from './post-processor.js';
+import { buildSkillsContext } from '../skills/registry.js';
 
 type RuntimeFactory = (type: RuntimeType, projectConfig: ProjectConfig, agentConfig?: AgentConfig) => AgentRuntime;
 
 interface RunOptions {
   inputData?: Record<string, unknown>;
+  stream?: boolean;
+  noEval?: boolean;
+}
+
+interface RenderContext {
+  input: string;
+  inputs?: Record<string, unknown>;
+  workflowId: string;
+  runId: string;
+  runDir: string;
+  steps: Record<string, { outputFile?: string }>;
+  processedContexts: Record<string, string>;
+  skills: Record<string, { instructions: string; output_format?: string }>;
 }
 
 interface WorkflowEngineDeps {
@@ -35,7 +43,7 @@ interface WorkflowEngineDeps {
   runtimeFactory: RuntimeFactory;
   outputWriter: OutputWriter;
   gateManager: GateManager;
-  progressUI: ProgressUI;
+  eventHandler: EngineEventHandler;
   cache?: StepCache;
 }
 
@@ -54,6 +62,7 @@ function getRuntimeErrorMeta(error: unknown): Record<string, unknown> {
 
 export class WorkflowEngine {
   private readonly dagParser = new DAGParser();
+  private interrupted = false;
 
   constructor(private readonly deps: WorkflowEngineDeps) {}
 
@@ -73,10 +82,11 @@ export class WorkflowEngine {
       state,
       plan,
       isResume: false,
+      stream: options?.stream ?? false,
     });
   }
 
-  async resume(runId: string): Promise<RunState> {
+  async resume(runId: string, options?: { stream?: boolean }): Promise<RunState> {
     const projectConfig = this.deps.configLoader.loadProjectConfig();
     const state = this.deps.stateManager.findRunById(runId);
     const agents = this.deps.configLoader.loadAgents();
@@ -90,6 +100,7 @@ export class WorkflowEngine {
       state,
       plan,
       isResume: true,
+      stream: options?.stream ?? false,
     });
   }
 
@@ -100,8 +111,9 @@ export class WorkflowEngine {
     state: RunState;
     plan: ReturnType<DAGParser['parse']>;
     isResume: boolean;
+    stream: boolean;
   }): Promise<RunState> {
-    const { projectConfig, agents, workflow, state, plan, isResume } = params;
+    const { projectConfig, agents, workflow, state, plan, isResume, stream } = params;
     const runDir = this.deps.stateManager.getRunDir(workflow.workflow.id, state.runId);
     this.deps.outputWriter.ensureDir(runDir);
     const logger = new EventLogger(path.join(runDir, 'events.jsonl'));
@@ -123,7 +135,7 @@ export class WorkflowEngine {
       status: 'running',
       completedAt: undefined,
     });
-    this.deps.progressUI.start(plan, state, workflow.workflow.name);
+    this.deps.eventHandler.onWorkflowStart(workflow.workflow.name, plan, state);
     logger.log('workflow.started', {
       workflowId: workflow.workflow.id,
       runId: state.runId,
@@ -132,6 +144,7 @@ export class WorkflowEngine {
     });
 
     const onSigint = (): void => {
+      this.interrupted = true;
       const runningIds = Object.entries(state.steps)
         .filter(([, value]) => value.status === 'running')
         .map(([stepId]) => stepId);
@@ -146,10 +159,18 @@ export class WorkflowEngine {
         completedAt: Date.now(),
       });
       logger.log('workflow.interrupted', { runId: state.runId, workflowId: state.workflowId });
-      this.deps.progressUI.stop();
-      process.exit(0);
+      this.deps.eventHandler.onWorkflowInterrupted(state);
     };
     process.on('SIGINT', onSigint);
+
+    // Load skills for template rendering
+    let skillsContext: Record<string, { instructions: string; output_format?: string }> = {};
+    try {
+      const skillsRegistry = this.deps.configLoader.createSkillsRegistry();
+      skillsContext = buildSkillsContext(skillsRegistry.getAll()).skills;
+    } catch {
+      // Skills directory may not exist, continue without skills
+    }
 
     try {
       const stepById = new Map(workflow.steps.map((step) => [step.id, step]));
@@ -166,19 +187,32 @@ export class WorkflowEngine {
           state,
           runDir,
           logger,
+          stream,
+          skillsContext,
         });
       });
 
       await scheduler.run();
+      if (this.interrupted) {
+        throw new WorkflowInterruptError();
+      }
       this.deps.stateManager.updateRun(state, { status: 'completed', completedAt: Date.now() });
       logger.log('workflow.completed', { runId: state.runId, workflowId: state.workflowId });
-      this.deps.progressUI.complete(state);
+      this.deps.eventHandler.onWorkflowComplete(state);
+      await this.writeRunMetadata({ state, workflow, agents, projectConfig });
       return state;
     } catch (error) {
-      if (error instanceof GateRejectError) {
+      if (error instanceof GateRejectError || error instanceof WorkflowInterruptError) {
         this.deps.stateManager.updateRun(state, { status: 'interrupted', completedAt: Date.now() });
-        logger.log('workflow.interrupted', { runId: state.runId, workflowId: state.workflowId, reason: 'gate' });
-        this.deps.progressUI.complete(state);
+        logger.log('workflow.interrupted', {
+          runId: state.runId,
+          workflowId: state.workflowId,
+          reason: error instanceof GateRejectError ? 'gate' : 'signal',
+        });
+        if (!(error instanceof WorkflowInterruptError)) {
+          this.deps.eventHandler.onWorkflowInterrupted(state);
+        }
+        await this.writeRunMetadata({ state, workflow, agents, projectConfig });
         return state;
       }
 
@@ -193,9 +227,11 @@ export class WorkflowEngine {
         error: message,
         ...getRuntimeErrorMeta(error),
       });
-      this.deps.progressUI.stop();
+      this.deps.eventHandler.onWorkflowFailed(state, error instanceof Error ? error : new Error(String(error)));
+      await this.writeRunMetadata({ state, workflow, agents, projectConfig });
       throw error;
     } finally {
+      this.interrupted = false;
       process.off('SIGINT', onSigint);
     }
   }
@@ -208,6 +244,8 @@ export class WorkflowEngine {
     state: RunState;
     runDir: string;
     logger: EventLogger;
+    stream: boolean;
+    skillsContext: Record<string, { instructions: string; output_format?: string }>;
   }): Promise<void> {
     const { projectConfig, step, logger, state, workflow } = params;
     const retryConfig = step.retry ?? projectConfig.retry;
@@ -216,7 +254,10 @@ export class WorkflowEngine {
 
     for (let attempt = 0; attempt <= maxAttempts; attempt += 1) {
       try {
-        await this.executeStepCore(params);
+        await this.executeStepCore({
+          ...params,
+          skillsContext: params.skillsContext,
+        });
         return;
       } catch (error) {
         if (error instanceof GateRejectError) {
@@ -240,7 +281,7 @@ export class WorkflowEngine {
             error: message,
             ...getRuntimeErrorMeta(error),
           });
-          this.deps.progressUI.announceRetry(step.id, retryCount, maxAttempts, message);
+          this.deps.eventHandler.onStepRetry(step.id, retryCount, maxAttempts, message);
           await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
           continue;
         }
@@ -261,7 +302,7 @@ export class WorkflowEngine {
               error: message,
               reason: 'on_failure=skip',
             });
-            this.deps.progressUI.updateStep(step.id, 'skipped', { error: message });
+            this.deps.eventHandler.onStepSkipped(step.id, message);
             return; // Don't throw, allow workflow to continue
 
           case 'fallback':
@@ -295,7 +336,7 @@ export class WorkflowEngine {
                 error: `Primary: ${message}; Fallback: ${fallbackMessage}`,
                 ...getRuntimeErrorMeta(fallbackError),
               });
-              this.deps.progressUI.updateStep(step.id, 'failed', { error: fallbackMessage });
+              this.deps.eventHandler.onStepFailed(step.id, fallbackMessage);
               throw fallbackError;
             }
 
@@ -321,7 +362,7 @@ export class WorkflowEngine {
               reason: 'on_failure=notify',
               ...getRuntimeErrorMeta(error),
             });
-            this.deps.progressUI.updateStep(step.id, 'failed', { error: message });
+            this.deps.eventHandler.onStepFailed(step.id, message);
             throw error;
 
           case 'fail':
@@ -349,7 +390,7 @@ export class WorkflowEngine {
               error: message,
               ...getRuntimeErrorMeta(error),
             });
-            this.deps.progressUI.updateStep(step.id, 'failed', { error: message });
+            this.deps.eventHandler.onStepFailed(step.id, message);
             throw error;
         }
       }
@@ -364,14 +405,19 @@ export class WorkflowEngine {
     state: RunState;
     runDir: string;
     logger: EventLogger;
+    stream: boolean;
+    skillsContext: Record<string, { instructions: string; output_format?: string }>;
   }): Promise<void> {
-    const { projectConfig, agents, workflow, step, state, runDir, logger } = params;
+    const { projectConfig, agents, workflow, step, state, runDir, logger, stream, skillsContext } = params;
+    if (this.interrupted) {
+      throw new WorkflowInterruptError();
+    }
     const startedAt = Date.now();
     this.deps.stateManager.updateStep(state, step.id, {
       status: 'running',
       startedAt,
     });
-    this.deps.progressUI.updateStep(step.id, 'running');
+    this.deps.eventHandler.onStepStart(step.id);
     logger.log('step.started', { stepId: step.id, agent: step.agent });
 
     const agent = agents.get(step.agent);
@@ -379,7 +425,9 @@ export class WorkflowEngine {
       throw new Error(`Agent "${step.agent}" not found`);
     }
 
-    const renderedPrompt = renderTemplate(step.task, {
+    // Process context if configured
+    const processedContexts: Record<string, string> = {};
+    const templateContextBase = {
       input: state.input,
       inputs: state.inputData,
       workflowId: workflow.workflow.id,
@@ -388,23 +436,52 @@ export class WorkflowEngine {
       steps: Object.fromEntries(
         Object.entries(state.steps).map(([stepId, stepState]) => [stepId, { outputFile: stepState.outputFile }]),
       ),
-    });
+      processedContexts,
+      skills: skillsContext,
+    } satisfies RenderContext;
+    let systemPrompt = renderTemplate(agent.prompt.system, templateContextBase);
+
+    if (step.context) {
+      const { from, strategy, max_tokens, inject_as } = step.context;
+      const sourceStep = state.steps[from];
+      if (!sourceStep?.outputFile) {
+        throw new Error(`Context step "${from}" has no output`);
+      }
+      const sourceOutputPath = path.join(runDir, sourceStep.outputFile);
+      const rawContent = fs.readFileSync(sourceOutputPath, 'utf8');
+
+      const processedContent = await processContext({
+        rawContent,
+        strategy,
+        maxTokens: max_tokens,
+        autoThresholds: projectConfig.context
+          ? {
+              rawLimit: projectConfig.context.auto_raw_threshold ?? 500,
+              truncateLimit: projectConfig.context.auto_truncate_threshold ?? 2000,
+            }
+          : undefined,
+        summarizeRuntime: this.deps.runtimeFactory(agent.runtime.type, projectConfig, agent),
+        summarizeModel: projectConfig.context?.summary_model || agent.runtime.model || projectConfig.runtime.default_model,
+      });
+
+      processedContexts[from] = processedContent;
+
+      if (inject_as === 'system') {
+        systemPrompt = `${systemPrompt}\n\n${processedContent}`;
+      }
+    }
+
+    let renderedPrompt = renderTemplate(step.task, templateContextBase);
+    if (step.context?.inject_as === 'user') {
+      renderedPrompt = `${processedContexts[step.context.from]}\n\n${renderedPrompt}`;
+    }
 
     // Resolve custom filename if configured
     let customFilename: string | undefined;
     if (workflow.output.files) {
       const fileConfig = workflow.output.files.find((f) => f.step === step.id);
       if (fileConfig) {
-        customFilename = renderTemplate(fileConfig.filename, {
-          input: state.input,
-          inputs: state.inputData,
-          workflowId: workflow.workflow.id,
-          runId: state.runId,
-          runDir,
-          steps: Object.fromEntries(
-            Object.entries(state.steps).map(([stepId, stepState]) => [stepId, { outputFile: stepState.outputFile }]),
-          ),
-        });
+        customFilename = renderTemplate(fileConfig.filename, templateContextBase);
       }
     }
 
@@ -445,7 +522,7 @@ export class WorkflowEngine {
         });
 
         const previewLines = projectConfig.output.preview_lines;
-        this.deps.progressUI.updateStep(step.id, 'completed', {
+        this.deps.eventHandler.onStepComplete(step.id, {
           duration: durationMs,
           outputPreview: cached.output.split('\n').slice(0, previewLines).join('\n'),
           tokenUsage: cached.tokenUsage,
@@ -456,12 +533,27 @@ export class WorkflowEngine {
     }
 
     try {
-      const result = await runtime.execute({
-        systemPrompt: agent.prompt.system,
-        userPrompt: renderedPrompt,
-        model,
-        timeoutSeconds,
-      });
+      let result;
+      if (stream && runtime.executeStream) {
+        result = await runtime.executeStream(
+          {
+            systemPrompt,
+            userPrompt: renderedPrompt,
+            model,
+            timeoutSeconds,
+          },
+          (chunk) => {
+            this.deps.eventHandler.onStreamChunk?.(step.id, chunk);
+          },
+        );
+      } else {
+        result = await runtime.execute({
+          systemPrompt,
+          userPrompt: renderedPrompt,
+          model,
+          timeoutSeconds,
+        });
+      }
       const finalOutput = await this.applyPostProcessors(result.output, step, state, workflow);
 
       // Store in cache if enabled
@@ -491,7 +583,7 @@ export class WorkflowEngine {
         tokenUsage: result.tokenUsage,
       });
       const previewLines = projectConfig.output.preview_lines;
-      this.deps.progressUI.updateStep(step.id, 'completed', {
+      this.deps.eventHandler.onStepComplete(step.id, {
         duration: durationMs,
         outputPreview: finalOutput.split('\n').slice(0, previewLines).join('\n'),
         tokenUsage: result.tokenUsage,
@@ -499,7 +591,7 @@ export class WorkflowEngine {
 
       if (step.gate === 'approve') {
         logger.log('gate.waiting', { stepId: step.id, gateType: 'approve' });
-        this.deps.progressUI.showGatePrompt(step.id, finalOutput, previewLines);
+        this.deps.eventHandler.onGateWaiting(step.id, finalOutput, previewLines);
         const decision = await this.deps.gateManager.handleGate(step.id, 'approve', finalOutput);
         if (decision.action === 'abort') {
           logger.log('gate.rejected', { stepId: step.id });
@@ -560,5 +652,62 @@ export class WorkflowEngine {
     }
 
     return currentOutput;
+  }
+
+  private async writeRunMetadata(params: {
+    state: RunState;
+    workflow: WorkflowConfig;
+    agents: Map<string, AgentConfig>;
+    projectConfig: ProjectConfig;
+    evalResult?: { score: number; tokenCost: number };
+  }): Promise<void> {
+    const { state, workflow, agents, evalResult } = params;
+
+    // Calculate total token cost from all steps
+    let totalTokenCost = 0;
+    for (const stepState of Object.values(state.steps)) {
+      if (stepState.tokenUsage) {
+        totalTokenCost += stepState.tokenUsage.totalTokens;
+      }
+    }
+    if (evalResult?.tokenCost) {
+      totalTokenCost += evalResult.tokenCost;
+    }
+
+    // Collect agents and models used
+    const agentIds: string[] = [];
+    const models: string[] = [];
+    for (const step of workflow.steps) {
+      if (!agentIds.includes(step.agent)) {
+        agentIds.push(step.agent);
+        const agentConfig = agents.get(step.agent);
+        models.push(agentConfig?.runtime.model || params.projectConfig.runtime.default_model);
+      }
+    }
+
+    const metadata = {
+      runId: state.runId,
+      workflowId: state.workflowId,
+      agents: agentIds,
+      models,
+      score: evalResult?.score,
+      tokenCost: totalTokenCost,
+      duration: (state.completedAt ?? Date.now()) - state.startedAt,
+      createdAt: new Date(state.startedAt).toISOString(),
+    };
+
+    // Write to metadata.jsonl
+    const outputDir = this.deps.stateManager.getOutputDir();
+    const metadataDir = path.join(outputDir, '.runs');
+    const metadataPath = path.join(metadataDir, 'metadata.jsonl');
+
+    try {
+      fs.mkdirSync(metadataDir, { recursive: true });
+      const line = JSON.stringify(metadata) + '\n';
+      fs.appendFileSync(metadataPath, line);
+    } catch (error) {
+      // Don't fail the workflow if metadata writing fails
+      console.warn('Failed to write run metadata:', error instanceof Error ? error.message : error);
+    }
   }
 }

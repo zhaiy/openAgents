@@ -15,7 +15,7 @@ Transparent and controllable multi-agent orchestration engine.
 - Real-time progress UI in terminal (`ora` + `chalk` + `boxen`)
 - Human-in-the-loop gate (`yes/no/edit`) on critical steps
 - Gate automation options (`--auto-approve`, `--gate-timeout`)
-- Resume from interruption with persisted state (`.state.json`)
+- Resume from interruption with persisted state (`.state.json`) and `--stream` support
 - Event logs for auditing (`events.jsonl`)
 - Parallel DAG scheduling and configurable retry strategy
 - Structured inputs (`--input-json`, `--input-file`) with `{{inputs.xxx}}`
@@ -23,6 +23,10 @@ Transparent and controllable multi-agent orchestration engine.
 - Step post-processors (`step.post_processors`) for user-defined output filtering
 - Step cache (`workflow.cache` / `step.cache`) and `openagents cache` commands
 - Developer tools: `openagents debug template`, `openagents dag`, `openagents validate --verbose`
+- LLM function calling with multi-round tool execution
+- Context processing with auto strategy: `raw`, `truncate`, `summarize`
+- Workflow evaluation (`openagents eval <run_id>`) with LLM judge
+- Skills registry for reusable agent skill definitions
 
 ## Quick Start
 
@@ -54,6 +58,8 @@ openagents run <workflow_id> --input-json '{"key":"value"}'
 openagents run <workflow_id> --input-file ./input.json
 openagents run <workflow_id> --auto-approve
 openagents resume <run_id>
+openagents resume <run_id> --stream
+openagents eval <run_id>
 openagents runs list
 openagents runs show <run_id>
 openagents runs logs <run_id>
@@ -63,6 +69,7 @@ openagents debug template <workflow_id> --input-json '{"key":"value"}'
 openagents dag <workflow_id>
 openagents cache stats
 openagents cache clear
+openagents analyze <workflow_id>
 ```
 
 ## Error Recovery
@@ -113,16 +120,73 @@ Best practices:
 - Log diagnostics to `stderr`, keep only final transformed payload in `stdout`.
 - Treat scripts as trusted code in production and review them like application code.
 
-Recommended layout:
+## Context Processing
 
-```text
-your-project/
-  scripts/
-    post-processors/
-      normalize-output.mjs
-      trim-context.mjs
-      redact-sensitive.mjs
+When a step depends on output from a previous step, use `context` to control how that output is processed:
+
+```yaml
+steps:
+  - id: research
+    agent: researcher
+    task: "Gather information"
+  - id: write
+    agent: writer
+    depends_on: [research]
+    context:
+      from: research
+      strategy: auto      # raw | truncate | summarize | auto
+      max_tokens: 1000
+      inject_as: system   # system | user
+    task: "Write based on: {{context.research}}"
 ```
+
+Strategies:
+- `raw`: pass through the full output
+- `truncate`: cut to `max_tokens`
+- `summarize`: use LLM to summarize to `max_tokens` (uses English prompts)
+- `auto`: automatically select based on content size thresholds
+
+## Workflow Evaluation
+
+Evaluate workflow runs with LLM judge:
+
+```yaml
+workflow:
+  eval:
+    enabled: true
+    type: llm-judge
+    judge_model: qwen-plus
+    dimensions:
+      - name: quality
+        weight: 1.0
+        prompt: "Assess the overall quality of the output"
+```
+
+```bash
+openagents eval <run_id>
+```
+
+Eval results are saved to `eval.json` with `runId`, `workflowId`, `evaluatedAt`, score, and dimension breakdowns.
+
+## Skills Registry
+
+Define reusable skills in `skills/` directory:
+
+```yaml
+# skills/math.yaml
+skill:
+  id: math
+  name: Math Helper
+  description: Performs mathematical calculations
+  version: 1.0
+
+instructions: |
+  You are a math assistant. Calculate precisely and show work.
+
+output_format: Return JSON with "result" and "steps" fields.
+```
+
+Skills are injected into agent context as `{{skills.skillId.instructions}}`.
 
 Multi-processor chain example:
 

@@ -3,8 +3,10 @@ import path from 'node:path';
 import { Command } from 'commander';
 
 import { OpenAgentsError } from '../errors.js';
+import { EvalRunner } from '../eval/runner.js';
 import { getDefaultLocale, t } from '../i18n/index.js';
 import { EventLogger } from '../output/logger.js';
+import { createRuntime } from '../runtime/factory.js';
 import type { RunState, RunStatus } from '../types/index.js';
 import { buildAppContext, formatDateTime, formatDurationMs, resolveLocaleFromCommand } from './shared.js';
 
@@ -12,6 +14,7 @@ interface RunsListOptions {
   status?: RunStatus;
   workflow?: string;
   lang?: string;
+  eval?: boolean;
 }
 
 function formatProgress(state: RunState): string {
@@ -24,11 +27,13 @@ function pad(value: string, width: number): string {
   return value.padEnd(width, ' ');
 }
 
-function printRunsTable(states: RunState[]): void {
+function printRunsTable(states: RunState[], evals?: Map<string, { score: number; delta: number }>): void {
   const headers = ['RUN ID', 'WORKFLOW', 'STATUS', 'PROGRESS', 'CREATED'];
   const widths = [24, 16, 12, 10, 19];
   console.log(headers.map((h, i) => pad(h, widths[i])).join(' '));
   for (const state of states) {
+    const evalInfo = evals?.get(state.runId);
+    void evalInfo;
     console.log(
       [
         pad(state.runId, widths[0]),
@@ -36,6 +41,33 @@ function printRunsTable(states: RunState[]): void {
         pad(state.status, widths[2]),
         pad(formatProgress(state), widths[3]),
         pad(formatDateTime(state.startedAt).slice(0, 16), widths[4]),
+      ].join(' '),
+    );
+  }
+}
+
+function printRunsTableWithEval(states: RunState[], evals: Map<string, { score: number; delta: number }>): void {
+  const headers = ['RUN ID', 'WORKFLOW', 'SCORE', 'DELTA', 'STATUS', 'CREATED'];
+  const widths = [24, 16, 8, 8, 12, 19];
+  console.log(headers.map((h, i) => pad(h, widths[i])).join(' '));
+  for (const state of states) {
+    const evalInfo = evals.get(state.runId);
+    const scoreStr = evalInfo ? `${evalInfo.score}` : '-';
+    const deltaStr = evalInfo
+      ? evalInfo.delta > 0
+        ? `+${evalInfo.delta}`
+        : evalInfo.delta < 0
+          ? `${evalInfo.delta}`
+          : '0'
+      : '-';
+    console.log(
+      [
+        pad(state.runId, widths[0]),
+        pad(state.workflowId, widths[1]),
+        pad(scoreStr, widths[2]),
+        pad(deltaStr, widths[3]),
+        pad(state.status, widths[4]),
+        pad(formatDateTime(state.startedAt).slice(0, 16), widths[5]),
       ].join(' '),
     );
   }
@@ -51,10 +83,13 @@ export function createRunsCommand(): Command {
     .option('--status <status>', t(locale, 'runsStatusOption'))
     .option('--workflow <workflowId>', t(locale, 'runsWorkflowOption'))
     .option('--lang <locale>', t(locale, 'langOption'))
+    .option('--eval', 'Show evaluation scores')
     .action((options: RunsListOptions, command: Command) => {
       const resolvedLocale = resolveLocaleFromCommand(command, options.lang);
       try {
-        const { stateManager } = buildAppContext(resolvedLocale);
+        const { loader, stateManager } = buildAppContext(resolvedLocale);
+        const projectConfig = loader.loadProjectConfig();
+        const outputBaseDir = path.resolve(process.cwd(), projectConfig.output.base_directory);
         const states = stateManager.listRuns({
           status: options.status,
           workflowId: options.workflow,
@@ -63,7 +98,22 @@ export function createRunsCommand(): Command {
           console.log(t(resolvedLocale, 'runsEmpty'));
           return;
         }
-        printRunsTable(states);
+
+        if (options.eval) {
+          const runner = new EvalRunner(createRuntime, outputBaseDir, projectConfig);
+          const evals = new Map<string, { score: number; delta: number }>();
+
+          for (const state of states) {
+            const lastEval = runner.loadLastEval(state.workflowId, state.runId);
+            if (lastEval) {
+              evals.set(state.runId, { score: lastEval.score, delta: lastEval.comparedToLast?.scoreDelta ?? 0 });
+            }
+          }
+
+          printRunsTableWithEval(states, evals);
+        } else {
+          printRunsTable(states);
+        }
       } catch (error) {
         const message =
           error instanceof OpenAgentsError || error instanceof Error

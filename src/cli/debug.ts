@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import path from 'node:path';
 
 import { Command } from 'commander';
 
@@ -6,6 +7,7 @@ import { OpenAgentsError } from '../errors.js';
 import { getDefaultLocale, t } from '../i18n/index.js';
 import { buildAppContext, resolveLocaleFromCommand } from './shared.js';
 import { renderTemplate } from '../engine/template.js';
+import { DebugServer } from '../debug/server.js';
 
 interface TemplateOptions {
   input?: string;
@@ -100,5 +102,49 @@ export function createDebugCommand(): Command {
 
   return new Command('debug')
     .description('Debug tools for OpenAgents')
-    .addCommand(templateCommand);
+    .addCommand(templateCommand)
+    .addCommand(serverCommand);
 }
+
+interface ServerOptions {
+  port: number;
+  lang?: string;
+}
+
+const serverCommand = new Command('server')
+  .description('Start the debug HTTP server')
+  .option('-p, --port <number>', 'Port to listen on', (value) => parseInt(value, 10), 3000)
+  .option('--lang <locale>', 'Language for messages')
+  .action(async (options: ServerOptions, command: Command) => {
+    const resolvedLocale = resolveLocaleFromCommand(command, options.lang);
+    const { loader } = buildAppContext(resolvedLocale);
+    const projectConfig = loader.loadProjectConfig();
+
+    const projectRoot = loader.getProjectRoot();
+    const workflowsDir = path.join(projectRoot, 'workflows');
+    const outputDir = path.resolve(projectRoot, projectConfig.output.base_directory);
+    const runsDir = path.join(outputDir, '.runs');
+
+    const server = new DebugServer({
+      port: options.port,
+      workflowDir: workflowsDir,
+      runsDir,
+    });
+
+    console.log(t(resolvedLocale, 'debugServerStarted', { port: String(options.port) }));
+    console.log(`  DAG: http://localhost:${options.port}/`);
+    console.log(`  API: http://localhost:${options.port}/api/`);
+    console.log('');
+    console.log('Press Ctrl+C to stop');
+
+    await server.start();
+
+    // Handle SIGINT for graceful shutdown
+    const shutdown = async (): Promise<void> => {
+      console.log('\nStopping server...');
+      await server.stop();
+      process.exit(0);
+    };
+
+    process.on('SIGINT', shutdown);
+  });

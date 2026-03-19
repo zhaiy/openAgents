@@ -204,3 +204,110 @@ describe('renderTemplate with inputs', () => {
     expect(out).toBe('deep-value');
   });
 });
+
+describe('renderTemplate with processedContexts', () => {
+  it('replaces processed context variable', () => {
+    const out = renderTemplate('Context: {{context.research}}', {
+      input: '',
+      workflowId: 'wf1',
+      runId: 'run1',
+      runDir: '/tmp/none',
+      steps: {},
+      processedContexts: { research: 'Summarized research content' },
+    });
+    expect(out).toBe('Context: Summarized research content');
+  });
+
+  it('throws for missing processed context', () => {
+    expect(() =>
+      renderTemplate('{{context.nonexistent}}', {
+        input: '',
+        workflowId: 'wf1',
+        runId: 'run1',
+        runDir: '/tmp/none',
+        steps: {},
+        processedContexts: { research: 'content' },
+      }),
+    ).toThrow('no processed context for step "nonexistent"');
+  });
+});
+
+describe('renderTemplate with skills', () => {
+  it('replaces skills instructions variable', () => {
+    const out = renderTemplate('Skill: {{skills.code_gen.instructions}}', {
+      input: '',
+      workflowId: 'wf1',
+      runId: 'run1',
+      runDir: '/tmp/none',
+      steps: {},
+      skills: {
+        code_gen: {
+          instructions: 'You are a code generation expert.',
+          output_format: 'Return code only.',
+        },
+      },
+    });
+    expect(out).toBe('Skill: You are a code generation expert.');
+  });
+
+  it('replaces skills output_format variable', () => {
+    const out = renderTemplate('Format: {{skills.code_gen.output_format}}', {
+      input: '',
+      workflowId: 'wf1',
+      runId: 'run1',
+      runDir: '/tmp/none',
+      steps: {},
+      skills: {
+        code_gen: {
+          instructions: 'You are a code generation expert.',
+          output_format: 'Return code only.',
+        },
+      },
+    });
+    expect(out).toBe('Format: Return code only.');
+  });
+
+  it('returns empty string for missing output_format', () => {
+    const out = renderTemplate('Format: {{skills.no_format.output_format}}', {
+      input: '',
+      workflowId: 'wf1',
+      runId: 'run1',
+      runDir: '/tmp/none',
+      steps: {},
+      skills: {
+        no_format: {
+          instructions: 'No output format defined.',
+        },
+      },
+    });
+    expect(out).toBe('Format: ');
+  });
+
+  it('throws for missing skill', () => {
+    expect(() =>
+      renderTemplate('{{skills.nonexistent.instructions}}', {
+        input: '',
+        workflowId: 'wf1',
+        runId: 'run1',
+        runDir: '/tmp/none',
+        steps: {},
+        skills: {
+          code_gen: {
+            instructions: 'Expert',
+          },
+        },
+      }),
+    ).toThrow('skill "nonexistent" not found');
+  });
+
+  it('allows skills to be undefined (backward compatible)', () => {
+    const out = renderTemplate('input={{input}}', {
+      input: 'test',
+      workflowId: 'wf1',
+      runId: 'run1',
+      runDir: '/tmp/none',
+      steps: {},
+    });
+    expect(out).toBe('input=test');
+  });
+});

@@ -174,3 +174,164 @@ describe('LLMDirectRuntime token usage', () => {
     });
   });
 });
+
+describe('LLMDirectRuntime streaming', () => {
+  it('calls onChunk for each streaming delta', async () => {
+    const chunks = ['Hello', ' world', '!'];
+
+    // Create a mock streaming response body
+    const mockStream = new ReadableStream({
+      start(controller) {
+        for (const chunk of chunks) {
+          const data = JSON.stringify({
+            choices: [{ delta: { content: chunk } }],
+          });
+          controller.enqueue(new TextEncoder().encode(`data: ${data}\n\n`));
+        }
+        controller.enqueue(new TextEncoder().encode('data: [DONE]\n\n'));
+        controller.close();
+      },
+    });
+
+    globalThis.fetch = vi.fn(async () => {
+      return new Response(mockStream, {
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream' },
+      });
+    }) as typeof fetch;
+
+    const runtime = new LLMDirectRuntime({ apiKey: 'test-key', baseUrl: 'https://example.com' });
+    const onChunk = vi.fn();
+
+    const result = await runtime.executeStream!(
+      {
+        systemPrompt: 'sys',
+        userPrompt: 'user',
+        model: 'test-model',
+        timeoutSeconds: 10,
+      },
+      onChunk,
+    );
+
+    expect(result.output).toBe('Hello world!');
+    expect(onChunk).toHaveBeenCalledTimes(3);
+    expect(onChunk).toHaveBeenCalledWith('Hello');
+    expect(onChunk).toHaveBeenCalledWith(' world');
+    expect(onChunk).toHaveBeenCalledWith('!');
+  });
+
+  it('handles streaming with empty deltas', async () => {
+    const mockStream = new ReadableStream({
+      start(controller) {
+        const data1 = JSON.stringify({
+          choices: [{ delta: { content: 'Hello' } }],
+        });
+        const data2 = JSON.stringify({
+          choices: [{ delta: {} }], // empty delta
+        });
+        const data3 = JSON.stringify({
+          choices: [{ delta: { content: ' world' } }],
+        });
+        controller.enqueue(new TextEncoder().encode(`data: ${data1}\n\n`));
+        controller.enqueue(new TextEncoder().encode(`data: ${data2}\n\n`));
+        controller.enqueue(new TextEncoder().encode(`data: ${data3}\n\n`));
+        controller.enqueue(new TextEncoder().encode('data: [DONE]\n\n'));
+        controller.close();
+      },
+    });
+
+    globalThis.fetch = vi.fn(async () => {
+      return new Response(mockStream, {
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream' },
+      });
+    }) as typeof fetch;
+
+    const runtime = new LLMDirectRuntime({ apiKey: 'test-key', baseUrl: 'https://example.com' });
+    const onChunk = vi.fn();
+
+    const result = await runtime.executeStream!(
+      {
+        systemPrompt: 'sys',
+        userPrompt: 'user',
+        model: 'test-model',
+        timeoutSeconds: 10,
+      },
+      onChunk,
+    );
+
+    expect(result.output).toBe('Hello world');
+    expect(onChunk).toHaveBeenCalledTimes(2);
+  });
+
+  it('returns complete output from streaming', async () => {
+    const mockStream = new ReadableStream({
+      start(controller) {
+        for (let i = 0; i < 10; i++) {
+          const data = JSON.stringify({
+            choices: [{ delta: { content: `chunk${i} ` } }],
+          });
+          controller.enqueue(new TextEncoder().encode(`data: ${data}\n\n`));
+        }
+        controller.enqueue(new TextEncoder().encode('data: [DONE]\n\n'));
+        controller.close();
+      },
+    });
+
+    globalThis.fetch = vi.fn(async () => {
+      return new Response(mockStream, {
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream' },
+      });
+    }) as typeof fetch;
+
+    const runtime = new LLMDirectRuntime({ apiKey: 'test-key', baseUrl: 'https://example.com' });
+    const onChunk = vi.fn();
+
+    const result = await runtime.executeStream!(
+      {
+        systemPrompt: 'sys',
+        userPrompt: 'user',
+        model: 'test-model',
+        timeoutSeconds: 10,
+      },
+      onChunk,
+    );
+
+    expect(result.output).toBe('chunk0 chunk1 chunk2 chunk3 chunk4 chunk5 chunk6 chunk7 chunk8 chunk9 ');
+    expect(onChunk).toHaveBeenCalledTimes(10);
+  });
+
+  it('marks streaming timeout errors with timeout details', async () => {
+    globalThis.fetch = vi.fn((_input, init) => {
+      return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => {
+          const abortError = new Error('aborted');
+          abortError.name = 'AbortError';
+          reject(abortError);
+        });
+      });
+    }) as typeof fetch;
+
+    const runtime = new LLMDirectRuntime({ apiKey: 'test-key', baseUrl: 'https://example.com' });
+    const onChunk = vi.fn();
+
+    await expect(
+      runtime.executeStream!(
+        {
+          systemPrompt: 'sys',
+          userPrompt: 'user',
+          model: 'test-model',
+          timeoutSeconds: 0,
+        },
+        onChunk,
+      ),
+    ).rejects.toMatchObject({
+      name: 'RuntimeError',
+      details: {
+        isTimeout: true,
+        timeoutSeconds: 0,
+      },
+    });
+  });
+});

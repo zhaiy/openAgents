@@ -1,5 +1,16 @@
 export type RuntimeType = 'llm-direct' | 'openclaw' | 'opencode' | 'claude-code' | 'script';
 
+export interface SkillConfig {
+  skill: {
+    id: string;
+    name: string;
+    description: string;
+    version: string;
+  };
+  instructions: string;
+  output_format?: string;
+}
+
 export interface AgentConfig {
   agent: {
     id: string;
@@ -18,6 +29,22 @@ export interface AgentConfig {
     file?: string;
     inline?: string;
   };
+  skills?: string[];
+  tools?: ToolConfig[];
+}
+
+export type ToolConfig = MCP_toolConfig | Script_toolConfig;
+
+export interface MCP_toolConfig {
+  type: 'mcp';
+  server: string;
+  tool: string;
+}
+
+export interface Script_toolConfig {
+  type: 'script';
+  path: string;
+  args?: string[];
 }
 
 export interface RetryConfig {
@@ -56,6 +83,15 @@ export interface ScriptPostProcessorConfig {
   on_error?: PostProcessorErrorMode;
 }
 
+export type ContextStrategy = 'raw' | 'truncate' | 'summarize' | 'auto';
+
+export interface StepContextConfig {
+  from: string;
+  strategy: ContextStrategy;
+  max_tokens?: number;
+  inject_as?: 'system' | 'user';
+}
+
 export interface StepConfig {
   id: string;
   agent: string;
@@ -68,6 +104,7 @@ export interface StepConfig {
   fallback_agent?: string;
   notify?: NotifyConfig;
   post_processors?: ScriptPostProcessorConfig[];
+  context?: StepContextConfig;
 }
 
 export interface OutputFileConfig {
@@ -87,6 +124,7 @@ export interface WorkflowConfig {
     files?: OutputFileConfig[];
   };
   cache?: CacheConfig;
+  eval?: EvalConfig;
 }
 
 export interface ProjectConfig {
@@ -101,6 +139,11 @@ export interface ProjectConfig {
   output: {
     base_directory: string;
     preview_lines: number;
+  };
+  context?: {
+    auto_raw_threshold?: number;
+    auto_truncate_threshold?: number;
+    summary_model?: string;
   };
 }
 
@@ -173,6 +216,17 @@ export interface ExecuteParams {
   userPrompt: string;
   model: string;
   timeoutSeconds: number;
+  tools?: ToolDefinition[];
+  toolExecutor?: (name: string, args: Record<string, unknown>) => Promise<string>;
+}
+
+export interface ToolDefinition {
+  type: 'function';
+  function: {
+    name: string;
+    description: string;
+    parameters: Record<string, unknown>;
+  };
 }
 
 export interface ExecuteResult {
@@ -184,4 +238,48 @@ export interface ExecuteResult {
 
 export interface AgentRuntime {
   execute(params: ExecuteParams): Promise<ExecuteResult>;
+  executeStream?(
+    params: ExecuteParams,
+    onChunk: (chunk: string) => void,
+  ): Promise<ExecuteResult>;
+}
+
+export interface EvalDimension {
+  name: string;
+  weight: number;
+  prompt: string;
+}
+
+export interface EvalConfig {
+  enabled: boolean;
+  type: 'llm-judge';
+  judge_model?: string;
+  dimensions: EvalDimension[];
+}
+
+export interface EvaluationResult {
+  runId: string;
+  workflowId: string;
+  evaluatedAt: string;
+  score: number;
+  dimensions: Record<string, { score: number; reason: string }>;
+  tokenCost: number;
+  duration: number;
+  comparedToLast?: {
+    lastRunId: string;
+    lastScore: number;
+    scoreDelta: number;
+    direction: 'improved' | 'declined' | 'unchanged';
+  };
+}
+
+export interface RunMetadata {
+  runId: string;
+  workflowId: string;
+  agents: string[];
+  models: string[];
+  score?: number;
+  tokenCost: number;
+  duration: number;
+  createdAt: string;
 }

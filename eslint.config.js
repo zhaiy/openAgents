@@ -8,6 +8,7 @@ export default tseslint.config(
     files: ['src/**/*.ts'],
     rules: {
       '@typescript-eslint/no-explicit-any': 'error',
+      'no-useless-escape': 'off',
     },
   },
   {

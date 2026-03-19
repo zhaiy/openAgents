@@ -9,6 +9,7 @@ interface ResumeOptions {
   lang?: string;
   autoApprove?: boolean;
   gateTimeout?: string;
+  stream?: boolean;
 }
 
 function parseGateOptions(options: ResumeOptions): GateOptions {
@@ -33,12 +34,13 @@ export function createResumeCommand(): Command {
     .option('--lang <locale>', t(locale, 'langOption'))
     .option('--auto-approve', 'Auto-approve all gates without prompting')
     .option('--gate-timeout <seconds>', 'Auto-approve gate after N seconds of inactivity')
+    .option('--stream', 'Enable streaming output')
     .action(async (runId: string, options: ResumeOptions, command: Command) => {
       const resolvedLocale = resolveLocaleFromCommand(command, options.lang);
       const gateOptions = parseGateOptions(options);
       try {
         const { stateManager, engine } = buildAppContext(resolvedLocale, gateOptions);
-        const state = await engine.resume(runId);
+        const state = await engine.resume(runId, { stream: options.stream });
         const runDir = stateManager.getRunDir(state.workflowId, state.runId);
         console.log(t(resolvedLocale, 'resumeCompleted', { workflowId: state.workflowId, runId: state.runId }));
         console.log(t(resolvedLocale, 'outputDirectory', { runDir }));

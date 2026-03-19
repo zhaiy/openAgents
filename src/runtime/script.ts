@@ -58,8 +58,8 @@ export class ScriptRuntime implements AgentRuntime {
           // Expose only safe env vars, not cwd
         },
         // Provide a safe print function for script output instead of console
-        __print: (msg: string) => {
-          // Silently absorb print output to prevent info leakage
+        __print: (_msg: string): void => {
+          void _msg; // Silently absorb print output to prevent info leakage
         },
       };
 

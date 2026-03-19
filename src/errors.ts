@@ -40,3 +40,10 @@ export class GateRejectError extends OpenAgentsError {
     this.name = 'GateRejectError';
   }
 }
+
+export class WorkflowInterruptError extends OpenAgentsError {
+  constructor() {
+    super('工作流执行被中断', 0);
+    this.name = 'WorkflowInterruptError';
+  }
+}

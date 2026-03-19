@@ -25,6 +25,10 @@ function atomicWriteJson(filePath: string, value: unknown): void {
 export class StateManager {
   constructor(private readonly outputDir: string) {}
 
+  getOutputDir(): string {
+    return this.outputDir;
+  }
+
   private getRunIndexPath(): string {
     return path.join(this.outputDir, RUN_INDEX_FILE);
   }

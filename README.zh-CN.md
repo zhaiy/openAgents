@@ -15,7 +15,7 @@
 - 终端实时进度 UI（`ora` + `chalk` + `boxen`）
 - 关键节点人工审核门控（`yes/no/edit`）
 - Gate 自动化控制（`--auto-approve`、`--gate-timeout`）
-- 中断后基于状态文件恢复（`.state.json`）
+- 中断后基于状态文件恢复（`.state.json`）并支持 `--stream` 流式输出
 - 事件日志追踪与审计（`events.jsonl`）
 - DAG 并行调度与可配置重试机制
 - 结构化输入（`--input-json`、`--input-file`）与 `{{inputs.xxx}}` 模板变量
@@ -23,6 +23,10 @@
 - 步骤后置处理器（`step.post_processors`）支持用户自定义输出精简
 - 步骤缓存（`workflow.cache` / `step.cache`）与 `openagents cache` 管理命令
 - 开发者工具：`openagents debug template`、`openagents dag`、`openagents validate --verbose`
+- LLM Function Calling 支持多轮工具调用
+- 上下文处理：支持 `raw`、`truncate`、`summarize`、`auto` 自动策略
+- 工作流评估（`openagents eval <run_id>`）基于 LLM Judge
+- Skills 注册表：支持可复用技能定义
 
 ## 快速开始
 
@@ -54,6 +58,8 @@ openagents run <workflow_id> --input-json '{"key":"value"}'
 openagents run <workflow_id> --input-file ./input.json
 openagents run <workflow_id> --auto-approve
 openagents resume <run_id>
+openagents resume <run_id> --stream
+openagents eval <run_id>
 openagents runs list
 openagents runs show <run_id>
 openagents runs logs <run_id>
@@ -63,6 +69,7 @@ openagents debug template <workflow_id> --input-json '{"key":"value"}'
 openagents dag <workflow_id>
 openagents cache stats
 openagents cache clear
+openagents analyze <workflow_id>
 ```
 
 ## 错误恢复策略
@@ -113,36 +120,73 @@ steps:
 - 调试信息写入 `stderr`，仅将最终处理结果写入 `stdout`。
 - 生产环境将脚本视为可信代码资产，按应用代码标准进行评审与审计。
 
-推荐目录结构：
+## 上下文处理
 
-```text
-your-project/
-  scripts/
-    post-processors/
-      normalize-output.mjs
-      trim-context.mjs
-      redact-sensitive.mjs
-```
-
-多处理器链路示例：
+当步骤依赖前序步骤的输出时，可通过 `context` 控制该输出的处理方式：
 
 ```yaml
 steps:
-  - id: load_context
-    agent: planner
-    task: "生成上下文内容"
-    post_processors:
-      - type: script
-        name: normalize
-        command: node scripts/post-processors/normalize-output.mjs
-        on_error: fail
-      - type: script
-        name: trim
-        command: node scripts/post-processors/trim-context.mjs
-        timeout_ms: 3000
-        max_output_chars: 8000
-        on_error: passthrough
+  - id: research
+    agent: researcher
+    task: "收集信息"
+  - id: write
+    agent: writer
+    depends_on: [research]
+    context:
+      from: research
+      strategy: auto      # raw | truncate | summarize | auto
+      max_tokens: 1000
+      inject_as: system   # system | user
+    task: "根据以下内容写作：{{context.research}}"
 ```
+
+处理策略：
+- `raw`：原样传递完整输出
+- `truncate`：截断至 `max_tokens`
+- `summarize`：调用 LLM 摘要至 `max_tokens`（使用英文提示词）
+- `auto`：根据内容大小自动选择策略
+
+## 工作流评估
+
+使用 LLM Judge 对工作流运行结果进行评估：
+
+```yaml
+workflow:
+  eval:
+    enabled: true
+    type: llm-judge
+    judge_model: qwen-plus
+    dimensions:
+      - name: quality
+        weight: 1.0
+        prompt: "评估输出的整体质量"
+```
+
+```bash
+openagents eval <run_id>
+```
+
+评估结果保存至 `eval.json`，包含 `runId`、`workflowId`、`evaluatedAt`、总分及各维度评分。
+
+## Skills 注册表
+
+在 `skills/` 目录下定义可复用技能：
+
+```yaml
+# skills/math.yaml
+skill:
+  id: math
+  name: 数学助手
+  description: 执行数学计算
+  version: 1.0
+
+instructions: |
+  你是一个数学助手。精确计算并展示计算过程。
+
+output_format: 返回 JSON，包含 "result" 和 "steps" 字段。
+```
+
+技能通过 `{{skills.skillId.instructions}}` 注入到 agent 上下文中。
 
 ## 项目结构
 

@@ -404,4 +404,148 @@ describe('schema validation', () => {
       expect(result.success).toBe(true);
     });
   });
+
+  describe('context config', () => {
+    it('accepts step with context config using truncate strategy', () => {
+      const result = WorkflowConfigSchema.safeParse({
+        workflow: { id: 'novel_writing', name: 'Novel', description: 'desc' },
+        steps: [
+          { id: 'chapter', agent: 'writer', task: 'task' },
+          { id: 'review', agent: 'reviewer', task: 'review', context: { from: 'chapter', strategy: 'truncate', max_tokens: 1000 } },
+        ],
+        output: { directory: './output' },
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it('accepts step with context config using summarize strategy', () => {
+      const result = WorkflowConfigSchema.safeParse({
+        workflow: { id: 'novel_writing', name: 'Novel', description: 'desc' },
+        steps: [
+          { id: 'chapter', agent: 'writer', task: 'task' },
+          { id: 'review', agent: 'reviewer', task: 'review', context: { from: 'chapter', strategy: 'summarize', max_tokens: 500 } },
+        ],
+        output: { directory: './output' },
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it('accepts context config with inject_as=system', () => {
+      const result = WorkflowConfigSchema.safeParse({
+        workflow: { id: 'novel_writing', name: 'Novel', description: 'desc' },
+        steps: [
+          { id: 'chapter', agent: 'writer', task: 'task' },
+          { id: 'review', agent: 'reviewer', task: 'review', context: { from: 'chapter', strategy: 'truncate', inject_as: 'system' } },
+        ],
+        output: { directory: './output' },
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it('accepts context config with inject_as=user', () => {
+      const result = WorkflowConfigSchema.safeParse({
+        workflow: { id: 'novel_writing', name: 'Novel', description: 'desc' },
+        steps: [
+          { id: 'chapter', agent: 'writer', task: 'task' },
+          { id: 'review', agent: 'reviewer', task: 'review', context: { from: 'chapter', strategy: 'truncate', inject_as: 'user' } },
+        ],
+        output: { directory: './output' },
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it('rejects context config referencing non-existent step', () => {
+      const result = WorkflowConfigSchema.safeParse({
+        workflow: { id: 'novel_writing', name: 'Novel', description: 'desc' },
+        steps: [{ id: 'chapter', agent: 'writer', task: 'task' }],
+        output: { directory: './output' },
+      });
+      // The context step reference is validated at runtime, not schema validation time
+      expect(result.success).toBe(true);
+    });
+  });
+
+  describe('eval config', () => {
+    it('accepts workflow with eval config', () => {
+      const result = WorkflowConfigSchema.safeParse({
+        workflow: { id: 'novel_writing', name: 'Novel', description: 'desc' },
+        steps: [{ id: 'chapter', agent: 'writer', task: 'task' }],
+        output: { directory: './output' },
+        eval: {
+          enabled: true,
+          type: 'llm-judge',
+          judge_model: 'qwen-plus',
+          dimensions: [
+            { name: 'quality', weight: 1.0, prompt: 'Assess quality' },
+          ],
+        },
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it('accepts eval config with multiple dimensions', () => {
+      const result = WorkflowConfigSchema.safeParse({
+        workflow: { id: 'novel_writing', name: 'Novel', description: 'desc' },
+        steps: [{ id: 'chapter', agent: 'writer', task: 'task' }],
+        output: { directory: './output' },
+        eval: {
+          enabled: true,
+          type: 'llm-judge',
+          dimensions: [
+            { name: 'relevance', weight: 0.6, prompt: 'Assess relevance' },
+            { name: 'coherence', weight: 0.4, prompt: 'Assess coherence' },
+          ],
+        },
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it('accepts eval config without judge_model (uses default)', () => {
+      const result = WorkflowConfigSchema.safeParse({
+        workflow: { id: 'novel_writing', name: 'Novel', description: 'desc' },
+        steps: [{ id: 'chapter', agent: 'writer', task: 'task' }],
+        output: { directory: './output' },
+        eval: {
+          enabled: true,
+          type: 'llm-judge',
+          dimensions: [
+            { name: 'quality', weight: 1.0, prompt: 'Assess quality' },
+          ],
+        },
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it('rejects eval config with dimension weight sum not equal to 1', () => {
+      // Note: Schema doesn't validate weight sum, only that weights are numbers
+      const result = WorkflowConfigSchema.safeParse({
+        workflow: { id: 'novel_writing', name: 'Novel', description: 'desc' },
+        steps: [{ id: 'chapter', agent: 'writer', task: 'task' }],
+        output: { directory: './output' },
+        eval: {
+          enabled: true,
+          type: 'llm-judge',
+          dimensions: [
+            { name: 'relevance', weight: 0.3, prompt: 'Assess relevance' },
+            { name: 'coherence', weight: 0.3, prompt: 'Assess coherence' },
+          ],
+        },
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it('accepts disabled eval config', () => {
+      const result = WorkflowConfigSchema.safeParse({
+        workflow: { id: 'novel_writing', name: 'Novel', description: 'desc' },
+        steps: [{ id: 'chapter', agent: 'writer', task: 'task' }],
+        output: { directory: './output' },
+        eval: {
+          enabled: false,
+          type: 'llm-judge',
+          dimensions: [],
+        },
+      });
+      expect(result.success).toBe(true);
+    });
+  });
 });

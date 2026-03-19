@@ -28,6 +28,8 @@ function createTempProject(): string {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'openagents-engine-it-'));
   tempRoots.push(root);
   fs.mkdirSync(path.join(root, 'agents'));
+  fs.mkdirSync(path.join(root, 'skills'));
+  fs.mkdirSync(path.join(root, 'scripts'));
   fs.mkdirSync(path.join(root, 'workflows'));
   write(
     path.join(root, 'openagents.yaml'),
@@ -56,13 +58,18 @@ function createEngine(
   const stateManager = new StateManager(outputBaseDir);
   const outputWriter = new OutputWriter();
   const gateManager = new GateManager('en', { autoApprove: true });
-  const progressUI = {
-    start: () => {},
-    updateStep: () => {},
-    announceRetry: () => {},
-    showGatePrompt: () => {},
-    complete: () => {},
-    stop: () => {},
+  const eventHandler = {
+    onWorkflowStart: () => {},
+    onWorkflowComplete: () => {},
+    onWorkflowFailed: () => {},
+    onWorkflowInterrupted: () => {},
+    onStepStart: () => {},
+    onStepComplete: () => {},
+    onStepFailed: () => {},
+    onStepSkipped: () => {},
+    onStepRetry: () => {},
+    onStreamChunk: () => {},
+    onGateWaiting: () => {},
   };
   const engine = new WorkflowEngine({
     configLoader: loader,
@@ -70,7 +77,7 @@ function createEngine(
     runtimeFactory,
     outputWriter,
     gateManager,
-    progressUI: progressUI as never,
+    eventHandler: eventHandler as never,
   });
   return { engine, stateManager };
 }
@@ -84,6 +91,219 @@ afterEach(() => {
 });
 
 describe('WorkflowEngine integration', () => {
+  it('renders skills in system prompt and injects processed context into user prompt', async () => {
+    const root = createTempProject();
+    write(
+      path.join(root, 'agents/researcher.yaml'),
+      `agent:
+  id: researcher
+  name: Researcher
+  description: creates research
+prompt:
+  system: collect facts
+runtime:
+  type: llm-direct
+  model: qwen-plus
+  timeout_seconds: 5
+`,
+    );
+    write(
+      path.join(root, 'agents/writer.yaml'),
+      `agent:
+  id: writer
+  name: Writer
+  description: writes with skill
+prompt:
+  system: |
+    role: writer
+    {{skills.style_guide.instructions}}
+runtime:
+  type: llm-direct
+  model: qwen-plus
+  timeout_seconds: 5
+`,
+    );
+    write(
+      path.join(root, 'skills/style_guide.yaml'),
+      `skill:
+  id: style_guide
+  name: Style Guide
+  description: style guidance
+  version: 1.0
+
+instructions: Write in a crisp tone.
+`,
+    );
+    write(
+      path.join(root, 'workflows/demo.yaml'),
+      `workflow:
+  id: demo
+  name: Demo
+  description: test skill render and user injection
+steps:
+  - id: research
+    agent: researcher
+    task: gather notes
+  - id: write
+    agent: writer
+    depends_on: [research]
+    context:
+      from: research
+      strategy: raw
+      inject_as: user
+    task: Draft article
+output:
+  directory: ./output
+`,
+    );
+
+    const calls: Array<{ agentId: string | undefined; systemPrompt: string; userPrompt: string }> = [];
+    const runtimeFactory = (_type: RuntimeType, _projectConfig: ProjectConfig, agentConfig?: AgentConfig): AgentRuntime => ({
+      execute: async (params): Promise<ExecuteResult> => {
+        calls.push({
+          agentId: agentConfig?.agent.id,
+          systemPrompt: params.systemPrompt,
+          userPrompt: params.userPrompt,
+        });
+        if (agentConfig?.agent.id === 'researcher') {
+          return { output: 'research summary', duration: 1 };
+        }
+        return { output: 'drafted', duration: 1 };
+      },
+    });
+    const { engine } = createEngine(root, runtimeFactory);
+
+    const state = await engine.run('demo', 'input');
+    expect(state.status).toBe('completed');
+
+    const writerCall = calls.find((call) => call.agentId === 'writer');
+    expect(writerCall?.systemPrompt).toContain('Write in a crisp tone.');
+    expect(writerCall?.userPrompt).toBe('research summary\n\nDraft article');
+  });
+
+  it('supports auto context strategy falling back to summarize for large content', async () => {
+    const root = createTempProject();
+    write(
+      path.join(root, 'agents/researcher.yaml'),
+      `agent:
+  id: researcher
+  name: Researcher
+  description: creates research
+prompt:
+  system: collect facts
+runtime:
+  type: llm-direct
+  model: qwen-plus
+  timeout_seconds: 5
+`,
+    );
+    write(
+      path.join(root, 'agents/writer.yaml'),
+      `agent:
+  id: writer
+  name: Writer
+  description: writes
+prompt:
+  system: write
+runtime:
+  type: llm-direct
+  model: qwen-plus
+  timeout_seconds: 5
+`,
+    );
+    write(
+      path.join(root, 'workflows/demo.yaml'),
+      `workflow:
+  id: demo
+  name: Demo
+  description: test auto summarize
+steps:
+  - id: research
+    agent: researcher
+    task: gather notes
+  - id: write
+    agent: writer
+    depends_on: [research]
+    context:
+      from: research
+      strategy: auto
+      max_tokens: 100
+    task: "{{context.research}}"
+output:
+  directory: ./output
+`,
+    );
+
+    const runtimeFactory = (_type: RuntimeType, _projectConfig: ProjectConfig, agentConfig?: AgentConfig): AgentRuntime => ({
+      execute: async (params): Promise<ExecuteResult> => {
+        if (agentConfig?.agent.id === 'researcher') {
+          return { output: 'a'.repeat(9000), duration: 1 };
+        }
+        if (params.systemPrompt.includes('text summarization assistant')) {
+          return { output: 'summarized context', duration: 1 };
+        }
+        expect(params.userPrompt).toContain('summarized context');
+        return { output: 'done', duration: 1 };
+      },
+    });
+    const { engine } = createEngine(root, runtimeFactory);
+
+    const state = await engine.run('demo', 'input');
+    expect(state.status).toBe('completed');
+    expect(state.steps.write.status).toBe('completed');
+  });
+
+  it('marks the run interrupted on SIGINT without exiting the process', async () => {
+    const root = createTempProject();
+    write(
+      path.join(root, 'agents/writer.yaml'),
+      `agent:
+  id: writer
+  name: Writer
+  description: succeeds
+prompt:
+  system: write
+runtime:
+  type: llm-direct
+  model: qwen-plus
+  timeout_seconds: 5
+`,
+    );
+    write(
+      path.join(root, 'workflows/demo.yaml'),
+      `workflow:
+  id: demo
+  name: Demo
+  description: test interrupt
+steps:
+  - id: write
+    agent: writer
+    task: produce content
+output:
+  directory: ./output
+`,
+    );
+
+    const runtimeFactory = (): AgentRuntime => ({
+      execute: async (): Promise<ExecuteResult> => {
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        return { output: 'late output', duration: 30 };
+      },
+    });
+    const { engine } = createEngine(root, runtimeFactory);
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
+
+    const runPromise = engine.run('demo', 'input');
+    setTimeout(() => {
+      process.emit('SIGINT');
+    }, 5);
+
+    const state = await runPromise;
+    expect(state.status).toBe('interrupted');
+    expect(exitSpy).not.toHaveBeenCalled();
+    exitSpy.mockRestore();
+  });
+
   it('continues downstream execution when dependency is skipped', async () => {
     const root = createTempProject();
     write(

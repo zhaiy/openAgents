@@ -12,6 +12,7 @@ import { createRuntime } from '../runtime/factory.js';
 import type { GateOptions } from '../types/index.js';
 import { ProgressUI } from '../ui/progress.js';
 import { StepCache } from '../engine/cache.js';
+import { CLIEventHandler } from './event-handler.js';
 
 export interface AppContext {
   projectRoot: string;
@@ -31,6 +32,7 @@ export function buildAppContext(locale?: Locale, gateOptions?: GateOptions): App
   const gateManager = new GateManager(resolvedLocale, gateOptions);
   const progressUI = new ProgressUI(resolvedLocale);
   const cache = new StepCache(path.join(outputBaseDir, '.cache'));
+  const eventHandler = new CLIEventHandler(progressUI);
 
   const engine = new WorkflowEngine({
     configLoader: loader,
@@ -38,7 +40,7 @@ export function buildAppContext(locale?: Locale, gateOptions?: GateOptions): App
     runtimeFactory: createRuntime,
     outputWriter,
     gateManager,
-    progressUI,
+    eventHandler,
     cache,
   });
 

@@ -5,8 +5,9 @@ import yaml from 'js-yaml';
 import { ZodError } from 'zod';
 
 import { ConfigError } from '../errors.js';
-import type { AgentConfig, ProjectConfig, WorkflowConfig } from '../types/index.js';
+import type { AgentConfig, ProjectConfig, SkillConfig, WorkflowConfig } from '../types/index.js';
 import { AgentConfigSchema, ProjectConfigSchema, WorkflowConfigSchema } from './schema.js';
+import { SkillsRegistry } from '../skills/registry.js';
 
 function formatZodError(error: ZodError): string {
   return error.issues
@@ -107,6 +108,24 @@ export class ConfigLoader {
       throw new ConfigError(`Workflow "${workflowId}" not found in workflows directory`);
     }
     return workflow;
+  }
+
+  loadSkills(): Map<string, SkillConfig> {
+    const skillsDir = path.join(this.projectRoot, 'skills');
+    const registry = new SkillsRegistry(skillsDir);
+    registry.loadAll();
+    const skills = new Map<string, SkillConfig>();
+    for (const skill of registry.getAll()) {
+      skills.set(skill.skill.id, skill);
+    }
+    return skills;
+  }
+
+  createSkillsRegistry(): SkillsRegistry {
+    const skillsDir = path.join(this.projectRoot, 'skills');
+    const registry = new SkillsRegistry(skillsDir);
+    registry.loadAll();
+    return registry;
   }
 
   validateReferences(agents: Map<string, AgentConfig>, workflow: WorkflowConfig): void {
