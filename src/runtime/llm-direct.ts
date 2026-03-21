@@ -12,6 +12,7 @@ interface LLMDirectRuntimeConfig {
 interface OpenAIMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
   content?: string;
+  reasoning_content?: string;
   tool_calls?: Array<{
     id: string;
     type: 'function';
@@ -38,11 +39,69 @@ interface OpenAIChatCompletionResponse {
   };
 }
 
+interface OpenAIStreamChunk {
+  choices?: Array<{
+    delta?: {
+      content?: string;
+      reasoning_content?: string;
+    };
+    message?: OpenAIMessage;
+  }>;
+  usage?: OpenAIChatCompletionResponse['usage'];
+}
+
 function normalizeResponseBody(text: string): string {
   if (!text) {
     return '';
   }
   return text.length > 4000 ? `${text.slice(0, 4000)}...(truncated)` : text;
+}
+
+function extractMessageOutput(message?: OpenAIMessage): string | undefined {
+  if (!message) {
+    return undefined;
+  }
+
+  if (typeof message.content === 'string' && message.content.length > 0) {
+    return message.content;
+  }
+
+  if (typeof message.reasoning_content === 'string' && message.reasoning_content.length > 0) {
+    return message.reasoning_content;
+  }
+
+  return undefined;
+}
+
+function extractStreamChunkOutput(chunk: OpenAIStreamChunk): string | undefined {
+  const choice = chunk.choices?.[0];
+  if (!choice) {
+    return undefined;
+  }
+
+  if (choice.delta) {
+    if (typeof choice.delta.content === 'string' && choice.delta.content.length > 0) {
+      return choice.delta.content;
+    }
+
+    if (typeof choice.delta.reasoning_content === 'string' && choice.delta.reasoning_content.length > 0) {
+      return choice.delta.reasoning_content;
+    }
+  }
+
+  return extractMessageOutput(choice.message);
+}
+
+function buildTokenUsage(usage?: OpenAIChatCompletionResponse['usage']) {
+  if (!usage) {
+    return undefined;
+  }
+
+  return {
+    promptTokens: usage.prompt_tokens,
+    completionTokens: usage.completion_tokens,
+    totalTokens: usage.total_tokens ?? 0,
+  };
 }
 
 export class LLMDirectRuntime implements AgentRuntime {
@@ -120,24 +179,22 @@ export class LLMDirectRuntime implements AgentRuntime {
 
         // If no tool_calls, return the content
         if (!message?.tool_calls || message.tool_calls.length === 0) {
-          const output = message?.content;
+          const output = extractMessageOutput(message);
           if (!output) {
-            throw new RuntimeError('LLM response does not contain choices[0].message.content', 'runtime', {
+            throw new RuntimeError(
+              'LLM response does not contain a supported output field (message.content or message.reasoning_content)',
+              'runtime',
+              {
               httpStatus: response.status,
               responseBody: normalizeResponseBody(rawText),
-            });
+              },
+            );
           }
 
           return {
             output,
             tokensUsed: lastResponse?.usage?.total_tokens,
-            tokenUsage: lastResponse?.usage
-              ? {
-                  promptTokens: lastResponse.usage.prompt_tokens,
-                  completionTokens: lastResponse.usage.completion_tokens,
-                  totalTokens: lastResponse.usage.total_tokens ?? 0,
-                }
-              : undefined,
+            tokenUsage: buildTokenUsage(lastResponse?.usage),
             duration: Date.now() - startedAt,
           };
         }
@@ -174,7 +231,7 @@ export class LLMDirectRuntime implements AgentRuntime {
         // Add assistant message and tool results to conversation
         messages.push({
           role: 'assistant',
-          content: message.content,
+          content: extractMessageOutput(message),
           tool_calls: message.tool_calls,
         });
         messages.push(...toolResults);
@@ -257,6 +314,37 @@ export class LLMDirectRuntime implements AgentRuntime {
         throw new RuntimeError('LLM response does not have a body', 'runtime');
       }
 
+      const contentType = response.headers.get('content-type')?.toLowerCase() || '';
+      if (!contentType.includes('text/event-stream')) {
+        const rawText = await response.text();
+        let json: OpenAIChatCompletionResponse | undefined;
+        try {
+          json = rawText ? (JSON.parse(rawText) as OpenAIChatCompletionResponse) : undefined;
+        } catch {
+          json = undefined;
+        }
+
+        const output = extractMessageOutput(json?.choices?.[0]?.message);
+        if (!output) {
+          throw new RuntimeError(
+            'LLM non-stream response does not contain a supported output field (message.content or message.reasoning_content)',
+            'runtime',
+            {
+              httpStatus: response.status,
+              responseBody: normalizeResponseBody(rawText),
+            },
+          );
+        }
+
+        onChunk(output);
+        return {
+          output,
+          tokensUsed: json?.usage?.total_tokens,
+          tokenUsage: buildTokenUsage(json?.usage),
+          duration: Date.now() - startedAt,
+        };
+      }
+
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
@@ -282,13 +370,8 @@ export class LLMDirectRuntime implements AgentRuntime {
               continue;
             }
             try {
-              const parsed = JSON.parse(data) as {
-                choices?: Array<{
-                  delta?: { content?: string };
-                }>;
-                usage?: OpenAIChatCompletionResponse['usage'];
-              };
-              const content = parsed.choices?.[0]?.delta?.content;
+              const parsed = JSON.parse(data) as OpenAIStreamChunk;
+              const content = extractStreamChunkOutput(parsed);
               if (content) {
                 fullOutput += content;
                 onChunk(content);
@@ -309,13 +392,8 @@ export class LLMDirectRuntime implements AgentRuntime {
         const data = buffer.slice(6).trim();
         if (data !== '[DONE]') {
           try {
-            const parsed = JSON.parse(data) as {
-              choices?: Array<{
-                delta?: { content?: string };
-              }>;
-              usage?: OpenAIChatCompletionResponse['usage'];
-            };
-            const content = parsed.choices?.[0]?.delta?.content;
+            const parsed = JSON.parse(data) as OpenAIStreamChunk;
+            const content = extractStreamChunkOutput(parsed);
             if (content) {
               fullOutput += content;
               onChunk(content);
@@ -332,13 +410,7 @@ export class LLMDirectRuntime implements AgentRuntime {
       return {
         output: fullOutput,
         tokensUsed: usage?.total_tokens,
-        tokenUsage: usage
-          ? {
-              promptTokens: usage.prompt_tokens,
-              completionTokens: usage.completion_tokens,
-              totalTokens: usage.total_tokens ?? 0,
-            }
-          : undefined,
+        tokenUsage: buildTokenUsage(usage),
         duration: Date.now() - startedAt,
       };
     } catch (error) {

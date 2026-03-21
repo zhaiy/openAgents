@@ -31,6 +31,8 @@ export class ProgressUI {
         return t(this.locale, 'statusInterrupted');
       case 'pending':
         return t(this.locale, 'statusPending');
+      case 'gate_waiting':
+        return 'gate_waiting';
       case 'skipped':
         return t(this.locale, 'statusSkipped');
       default:
@@ -133,7 +135,8 @@ export class ProgressUI {
     for (const [stepId, step] of Object.entries(state.steps)) {
       const index = this.stepIndexById.get(stepId) ?? 0;
       const prefix = `[${index}/${this.totalSteps}]`;
-      const statusIcon = step.status === 'completed' ? '✅' : step.status === 'failed' ? '❌' : '⚠️';
+      const statusIcon =
+        step.status === 'completed' ? '✅' : step.status === 'failed' ? '❌' : step.status === 'gate_waiting' ? '⏸' : '⚠️';
       const duration = step.durationMs ? `${Math.round(step.durationMs / 1000)}s` : '-';
       const tokens = step.tokenUsage?.totalTokens ?? 0;
       totalTokens += tokens;

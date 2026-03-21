@@ -147,7 +147,7 @@ export interface ProjectConfig {
   };
 }
 
-export type StepStatus = 'pending' | 'running' | 'completed' | 'failed' | 'interrupted' | 'skipped';
+export type StepStatus = 'pending' | 'running' | 'gate_waiting' | 'completed' | 'failed' | 'interrupted' | 'skipped';
 export type RunStatus = 'running' | 'completed' | 'failed' | 'interrupted';
 
 export interface StepState {
@@ -190,6 +190,7 @@ export type EventType =
   | 'step.cached'
   | 'step.retrying'
   | 'gate.waiting'
+  | 'gate.resolved'
   | 'gate.approved'
   | 'gate.rejected'
   | 'gate.edited';

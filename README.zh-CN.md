@@ -1,42 +1,74 @@
 # OpenAgents（中文文档）
 
-透明可控的多 Agent 协作编排引擎。
+面向终端的透明、可控、多 Agent 工作流编排引擎。
 
-主文档（英文）请查看 `README.md`。
+[English README](./README.md)
 
-## 核心价值
+## 为什么是 OpenAgents
 
-- **看得见**：工作流执行过程逐步可视化。
-- **管得住**：关键节点可审核、可中断、可恢复。
-- **查得到**：输出和运行状态持久化，便于回溯。
+OpenAgents 适合那些“让 Agent 跑起来”还不够的场景。
+你可以实时观察执行进度，在关键节点人工审核，中断后继续恢复，并把输出、日志、状态、评估结果都完整落盘。
 
-## 核心能力
+### 核心原则
 
-- 终端实时进度 UI（`ora` + `chalk` + `boxen`）
-- 关键节点人工审核门控（`yes/no/edit`）
-- Gate 自动化控制（`--auto-approve`、`--gate-timeout`）
-- 中断后基于状态文件恢复（`.state.json`）并支持 `--stream` 流式输出
-- 事件日志追踪与审计（`events.jsonl`）
-- DAG 并行调度与可配置重试机制
-- 结构化输入（`--input-json`、`--input-file`）与 `{{inputs.xxx}}` 模板变量
-- Script Runtime（`runtime.type: script`）支持本地脚本预处理
-- 步骤后置处理器（`step.post_processors`）支持用户自定义输出精简
-- 步骤缓存（`workflow.cache` / `step.cache`）与 `openagents cache` 管理命令
-- 开发者工具：`openagents debug template`、`openagents dag`、`openagents validate --verbose`
-- LLM Function Calling 支持多轮工具调用
-- 上下文处理：支持 `raw`、`truncate`、`summarize`、`auto` 自动策略
-- 工作流评估（`openagents eval <run_id>`）基于 LLM Judge
-- Skills 注册表：支持可复用技能定义
+- **看得见**：执行进度逐步可视化
+- **管得住**：关键步骤可审核、可编辑、可恢复
+- **查得到**：输出、日志、运行状态、评估结果都可追溯
+
+## 核心亮点
+
+### 工作流执行
+
+- 基于 DAG 的多 Agent 编排与并行调度
+- 人工门控，支持 `yes` / `no` / `edit`
+- Gate 自动化控制：`--auto-approve`、`--gate-timeout`
+- 基于状态文件恢复中断运行
+- 同时支持流式与非流式 LLM 输出
+- LLM Function Calling 多轮工具调用
+- Script Runtime 支持本地脚本预处理或自定义执行
+- Step Post-Processors 支持输出精简和变换
+- Step / Workflow 级缓存支持重复运行优化
+- 错误恢复模式：`fail`、`skip`、`fallback`、`notify`
+
+### 提示词与上下文
+
+- 支持纯文本输入，以及 `--input-json`、`--input-file` 结构化输入
+- 支持 `{{input}}`、`{{inputs.xxx}}`、`{{context.stepId}}` 等模板变量
+- 上下文处理策略：`raw`、`truncate`、`summarize`、`auto`
+- Skills 注册表支持可复用指令
+
+### 开发者体验
+
+- 基于 `ora`、`chalk`、`boxen` 的终端进度 UI
+- 配置校验支持 schema 与高级规则检查
+- `openagents debug template` 模板预览
+- `openagents dag` 工作流 DAG 可视化
+- `openagents debug server` 调试 HTTP 服务
+- 运行状态、日志、评估结果一键查看
+- 内置工作流评估与趋势分析
+
+### Provider 兼容性
+
+- 基于 OpenAI-compatible 风格的 `llm-direct` runtime
+- 自动兼容把推理结果放在 `reasoning_content` 的 provider
+- 自动兼容“请求流式但返回普通 JSON”的 provider
 
 ## 快速开始
+
+### 1. 安装依赖
 
 ```bash
 npm install
 npm run build
+```
+
+### 2. 直接从源码运行
+
+```bash
 npx tsx src/cli/index.ts run novel_writing --input "一个时间旅行悬疑故事"
 ```
 
-初始化示例项目：
+### 3. 或初始化一个示例项目
 
 ```bash
 npx tsx src/cli/index.ts init my-project
@@ -45,43 +77,177 @@ export OPENAGENTS_API_KEY=sk-xxxx
 npx tsx src/cli/index.ts run novel_writing --input "一个时间旅行悬疑故事"
 ```
 
-## CLI 命令
+## 初始化模板
+
+目前 `init` 命令内置这些模板：
+
+| 模板 | 用途 |
+| --- | --- |
+| `default` | 通用项目模板 |
+| `chatbot` | 对话式 Agent 工作流 |
+| `web-scraper` | 网页提取与摘要工作流 |
+
+查看模板列表：
+
+```bash
+openagents init --list-templates
+```
+
+使用指定模板：
+
+```bash
+openagents init my-project --template chatbot
+```
+
+## 常用命令
+
+### 初始化与校验
 
 ```bash
 openagents init [directory]
-openagents init --list-templates
 openagents init [directory] --template <name>
+openagents init --list-templates
 openagents validate
 openagents validate --verbose
+```
+
+### 运行工作流
+
+```bash
 openagents run <workflow_id> --input "..."
-openagents run <workflow_id> --input-json '{"key":"value"}'
+openagents run <workflow_id> --input-json '{"topic":"climate"}'
 openagents run <workflow_id> --input-file ./input.json
+openagents run <workflow_id> --stream
 openagents run <workflow_id> --auto-approve
+openagents run <workflow_id> --gate-timeout 30
+openagents run <workflow_id> --no-eval
 openagents resume <run_id>
 openagents resume <run_id> --stream
-openagents eval <run_id>
+```
+
+### 查看运行结果
+
+```bash
 openagents runs list
+openagents runs list --workflow <workflow_id>
+openagents runs list --eval
 openagents runs show <run_id>
 openagents runs logs <run_id>
-openagents agents list
-openagents workflows list
-openagents debug template <workflow_id> --input-json '{"key":"value"}'
-openagents dag <workflow_id>
-openagents cache stats
-openagents cache clear
+openagents eval <run_id>
 openagents analyze <workflow_id>
 ```
 
-## 错误恢复策略
+### 浏览项目能力
 
-- `on_failure: fail`（默认）：步骤失败即终止工作流。
-- `on_failure: skip`：当前步骤标记为跳过，继续执行后续可运行步骤。
-- `on_failure: fallback`：使用 `fallback_agent` 进行兜底执行。
-- `on_failure: notify`：先发送 `notify.webhook`，再将步骤与运行标记为失败。
+```bash
+openagents agents list
+openagents agents list --skills
+openagents workflows list
+openagents dag <workflow_id>
+openagents debug template <workflow_id> --input-json '{"key":"value"}'
+openagents debug server
+openagents cache stats
+openagents cache clear
+```
 
-## 步骤后置处理器（脚本）
+## 典型工作流
 
-你可以在 step 上配置 `post_processors`，在步骤输出写盘和传递给下游之前做自定义处理。
+```mermaid
+flowchart LR
+  A["定义 agents 和 workflows"] --> B["校验配置"]
+  B --> C["运行 workflow"]
+  C --> D{"需要 Gate 吗？"}
+  D -->|审批/编辑| E["继续执行"]
+  D -->|暂停| F["稍后 resume"]
+  E --> G["保存输出与日志"]
+  G --> H["评估并分析运行结果"]
+```
+
+## 架构图
+
+```mermaid
+flowchart TB
+  U["用户 / CLI"] --> CLI["CLI Commands\nrun / resume / validate / eval / debug"]
+  CLI --> CFG["配置加载器\nopenagents.yaml / agents / workflows / skills"]
+  CLI --> ENG["Workflow Engine"]
+
+  CFG --> ENG
+  ENG --> DAG["DAG 解析与调度"]
+  ENG --> GATE["Gate Manager"]
+  ENG --> CACHE["Step Cache"]
+  ENG --> STATE["State Manager"]
+  ENG --> OUT["Output Writer & Event Logger"]
+  ENG --> EVAL["Eval Runner"]
+
+  DAG --> RT["Runtime Factory"]
+  RT --> LLM["LLM Direct Runtime"]
+  RT --> SCRIPT["Script Runtime"]
+
+  LLM --> PROVIDER["LLM Provider API\n流式 / 非流式"]
+  SCRIPT --> LOCAL["本地脚本 / 工具"]
+
+  OUT --> FILES["Run Directory\noutputs / events.jsonl / eval.json"]
+  STATE --> FILES
+  EVAL --> FILES
+```
+
+整体上可以理解为：CLI 负责接收用户命令并加载项目配置，Workflow Engine 生成执行计划并驱动各步骤运行，Runtime 负责实际执行，而输出、日志、状态、评估结果都会统一写入运行目录，便于回放、排查和分析。
+
+## 配置示例
+
+### 结构化输入
+
+```yaml
+steps:
+  - id: plan
+    agent: planner
+    task: "为 {{inputs.topic}} 生成一份 {{inputs.language}} 计划。"
+```
+
+运行方式：
+
+```bash
+openagents run report --input-json '{"topic":"AI 安全","language":"中文"}'
+```
+
+### 上下文处理
+
+```yaml
+steps:
+  - id: research
+    agent: researcher
+    task: "收集背景信息"
+
+  - id: write
+    agent: writer
+    depends_on: [research]
+    context:
+      from: research
+      strategy: auto
+      max_tokens: 1000
+      inject_as: system
+    task: "基于以下内容写作：{{context.research}}"
+```
+
+### 错误恢复
+
+```yaml
+steps:
+  - id: summarize
+    agent: writer
+    on_failure: fallback
+    fallback_agent: backup_writer
+    task: "总结研究结果"
+```
+
+支持的 `on_failure`：
+
+- `fail`：停止工作流
+- `skip`：跳过当前步骤，尽可能继续执行后续步骤
+- `fallback`：切换到 `fallback_agent`
+- `notify`：发送 `notify.webhook` 后失败退出
+
+### 步骤后置处理器
 
 ```yaml
 steps:
@@ -94,61 +260,20 @@ steps:
         command: node scripts/shrink-context.mjs
         timeout_ms: 5000
         max_output_chars: 20000
-        on_error: fail # fail | skip | passthrough
+        on_error: fail
 ```
 
-脚本协议：
+脚本处理器约定：
 
-- 输入：引擎通过 `stdin` 传入原始步骤输出（UTF-8 文本）
-- 输出：脚本通过 `stdout` 输出处理结果
-- 日志：`stderr` 仅用于日志，不参与数据传递
-- 退出码：`0` 表示成功，非 `0` 表示失败
-- 环境变量：`OA_RUN_ID`、`OA_WORKFLOW_ID`、`OA_STEP_ID`、`OA_PROCESSOR_NAME`
+- 输入来自 `stdin`
+- 输出写入 `stdout`
+- 日志写入 `stderr`
+- 退出码 `0` 表示成功
+- 可用环境变量：`OA_RUN_ID`、`OA_WORKFLOW_ID`、`OA_STEP_ID`、`OA_PROCESSOR_NAME`
 
-`on_error` 行为：
+## 评估与分析
 
-- `fail`（默认）：当前步骤失败。
-- `skip`：跳过该处理器，继续后续处理链。
-- `passthrough`：停止处理链并透传 agent 原始输出。
-
-最佳实践：
-
-- 脚本应尽量保持幂等和确定性：相同输入得到相同输出。
-- 脚本尽量轻量，避免在处理链路中依赖外部网络调用。
-- 严格流程建议使用 `on_error: fail`，容错流程可考虑 `passthrough`。
-- 建议始终设置 `timeout_ms` 与 `max_output_chars` 作为资源上限。
-- 调试信息写入 `stderr`，仅将最终处理结果写入 `stdout`。
-- 生产环境将脚本视为可信代码资产，按应用代码标准进行评审与审计。
-
-## 上下文处理
-
-当步骤依赖前序步骤的输出时，可通过 `context` 控制该输出的处理方式：
-
-```yaml
-steps:
-  - id: research
-    agent: researcher
-    task: "收集信息"
-  - id: write
-    agent: writer
-    depends_on: [research]
-    context:
-      from: research
-      strategy: auto      # raw | truncate | summarize | auto
-      max_tokens: 1000
-      inject_as: system   # system | user
-    task: "根据以下内容写作：{{context.research}}"
-```
-
-处理策略：
-- `raw`：原样传递完整输出
-- `truncate`：截断至 `max_tokens`
-- `summarize`：调用 LLM 摘要至 `max_tokens`（使用英文提示词）
-- `auto`：根据内容大小自动选择策略
-
-## 工作流评估
-
-使用 LLM Judge 对工作流运行结果进行评估：
+OpenAgents 可以在运行完成后使用 LLM Judge 做评估，并和历史运行结果做对比。
 
 ```yaml
 workflow:
@@ -159,21 +284,22 @@ workflow:
     dimensions:
       - name: quality
         weight: 1.0
-        prompt: "评估输出的整体质量"
+        prompt: "评估输出整体质量"
 ```
+
+常用命令：
 
 ```bash
 openagents eval <run_id>
+openagents runs list --eval
+openagents analyze <workflow_id>
 ```
-
-评估结果保存至 `eval.json`，包含 `runId`、`workflowId`、`evaluatedAt`、总分及各维度评分。
 
 ## Skills 注册表
 
 在 `skills/` 目录下定义可复用技能：
 
 ```yaml
-# skills/math.yaml
 skill:
   id: math
   name: 数学助手
@@ -181,31 +307,37 @@ skill:
   version: 1.0
 
 instructions: |
-  你是一个数学助手。精确计算并展示计算过程。
+  你是一个数学助手。请精确计算并展示推导过程。
 
 output_format: 返回 JSON，包含 "result" 和 "steps" 字段。
 ```
 
-技能通过 `{{skills.skillId.instructions}}` 注入到 agent 上下文中。
+在模板中引用：
+
+```text
+{{skills.math.instructions}}
+```
 
 ## 项目结构
 
-- `src/cli`：CLI 入口与子命令实现
-- `src/config`：YAML 加载与 schema 校验
-- `src/engine`：DAG 解析、调度、模板渲染、工作流执行
-- `src/runtime`：运行时接口与实现（`llm-direct`、`script`）
-- `src/output`：输出文件与事件日志
-- `src/i18n`：中英文文案
-- `templates`：`init` 命令生成的项目模板
+```text
+src/
+  cli/        CLI 子命令
+  config/     YAML 加载与校验
+  engine/     调度、执行、缓存、状态管理
+  runtime/    llm-direct 与 script runtime
+  output/     输出文件、日志、通知
+  eval/       评估执行与 Judge 逻辑
+  ui/         终端界面渲染
+templates/    项目初始化模板
+docs/         设计文档、路线图、进度记录
+```
 
 ## 多语言支持
 
 - 支持语言：`en`、`zh`
 - 默认语言：`en`
-- 语言优先级：
-  - `--lang`
-  - `OPENAGENTS_LANG`
-  - fallback `en`
+- 优先级：`--lang` > `OPENAGENTS_LANG` > 默认 `en`
 
 示例：
 
@@ -214,11 +346,12 @@ npx tsx src/cli/index.ts --lang zh run novel_writing --input "悬疑故事"
 OPENAGENTS_LANG=zh npx tsx src/cli/index.ts run novel_writing --input "悬疑故事"
 ```
 
-## 文档
+## 相关文档
 
-- 产品需求文档：`docs/PRD-v3.md`
-- 技术设计与开发计划：`docs/TECHNICAL-DESIGN.md`
-- 英文主文档：`README.md`
+- [English README](./README.md)
+- [技术设计](./docs/TECHNICAL-DESIGN.md)
+- [开发进度](./docs/PROGRESS.md)
+- [功能路线图](./docs/FEATURE-ROADMAP.md)
 
 ## 许可证
 

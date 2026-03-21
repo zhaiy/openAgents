@@ -20,7 +20,11 @@
     "build": "rm -rf dist && tsc -p tsconfig.json",
     "lint": "eslint \"src/**/*.ts\"",
     "test": "vitest run src/__tests__",
-    "pack:check": "npm pack"
+    "pack:check": "npm pack",
+    "web:dev": "cd web && npm run dev",
+    "web:build": "cd web && npm run build",
+    "web:start": "tsx src/cli/index.ts web",
+    "web": "npm run web:start"
   },
   "keywords": [
     "agent",

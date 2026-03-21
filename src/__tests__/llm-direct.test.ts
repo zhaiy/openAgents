@@ -80,6 +80,34 @@ describe('LLMDirectRuntime error details', () => {
 });
 
 describe('LLMDirectRuntime token usage', () => {
+  it('falls back to reasoning_content for non-streaming responses', async () => {
+    globalThis.fetch = vi.fn(async () => {
+      return new Response(
+        JSON.stringify({
+          choices: [{ message: { content: '', reasoning_content: 'Reasoned answer' } }],
+          usage: {
+            total_tokens: 42,
+          },
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      );
+    }) as typeof fetch;
+
+    const runtime = new LLMDirectRuntime({ apiKey: 'test-key', baseUrl: 'https://example.com' });
+    const result = await runtime.execute({
+      systemPrompt: 'sys',
+      userPrompt: 'user',
+      model: 'test-model',
+      timeoutSeconds: 10,
+    });
+
+    expect(result.output).toBe('Reasoned answer');
+    expect(result.tokensUsed).toBe(42);
+  });
+
   it('extracts detailed token usage from response', async () => {
     globalThis.fetch = vi.fn(async () => {
       return new Response(
@@ -176,6 +204,81 @@ describe('LLMDirectRuntime token usage', () => {
 });
 
 describe('LLMDirectRuntime streaming', () => {
+  it('falls back to reasoning_content in streaming deltas', async () => {
+    const mockStream = new ReadableStream({
+      start(controller) {
+        const first = JSON.stringify({
+          choices: [{ delta: { reasoning_content: 'Reasoned ' } }],
+        });
+        const second = JSON.stringify({
+          choices: [{ delta: { reasoning_content: 'stream' } }],
+        });
+        controller.enqueue(new TextEncoder().encode(`data: ${first}\n\n`));
+        controller.enqueue(new TextEncoder().encode(`data: ${second}\n\n`));
+        controller.enqueue(new TextEncoder().encode('data: [DONE]\n\n'));
+        controller.close();
+      },
+    });
+
+    globalThis.fetch = vi.fn(async () => {
+      return new Response(mockStream, {
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream' },
+      });
+    }) as typeof fetch;
+
+    const runtime = new LLMDirectRuntime({ apiKey: 'test-key', baseUrl: 'https://example.com' });
+    const onChunk = vi.fn();
+
+    const result = await runtime.executeStream!(
+      {
+        systemPrompt: 'sys',
+        userPrompt: 'user',
+        model: 'test-model',
+        timeoutSeconds: 10,
+      },
+      onChunk,
+    );
+
+    expect(result.output).toBe('Reasoned stream');
+    expect(onChunk).toHaveBeenCalledTimes(2);
+    expect(onChunk).toHaveBeenCalledWith('Reasoned ');
+    expect(onChunk).toHaveBeenCalledWith('stream');
+  });
+
+  it('adapts when a streaming request returns a non-stream JSON response', async () => {
+    globalThis.fetch = vi.fn(async () => {
+      return new Response(
+        JSON.stringify({
+          choices: [{ message: { content: '', reasoning_content: 'JSON fallback answer' } }],
+          usage: { total_tokens: 21 },
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      );
+    }) as typeof fetch;
+
+    const runtime = new LLMDirectRuntime({ apiKey: 'test-key', baseUrl: 'https://example.com' });
+    const onChunk = vi.fn();
+
+    const result = await runtime.executeStream!(
+      {
+        systemPrompt: 'sys',
+        userPrompt: 'user',
+        model: 'test-model',
+        timeoutSeconds: 10,
+      },
+      onChunk,
+    );
+
+    expect(result.output).toBe('JSON fallback answer');
+    expect(result.tokensUsed).toBe(21);
+    expect(onChunk).toHaveBeenCalledTimes(1);
+    expect(onChunk).toHaveBeenCalledWith('JSON fallback answer');
+  });
+
   it('calls onChunk for each streaming delta', async () => {
     const chunks = ['Hello', ' world', '!'];
 

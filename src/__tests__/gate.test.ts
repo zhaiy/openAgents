@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import readline from 'node:readline/promises';
 
-import { GateManager } from '../engine/gate.js';
+import { GateManager, InteractiveGateProvider } from '../engine/gate.js';
 
 describe('GateManager', () => {
   it('returns continue for non-approve gate', async () => {
@@ -67,8 +67,9 @@ describe('GateManager', () => {
       close,
     } as unknown as ReturnType<typeof readline.createInterface>);
 
-    const manager = new GateManager();
-    vi.spyOn(manager as unknown as { editOutput: (content: string) => string }, 'editOutput').mockReturnValue(
+    const provider = new InteractiveGateProvider();
+    const manager = new GateManager(undefined, {}, provider);
+    vi.spyOn(provider as unknown as { editOutput: (content: string) => string }, 'editOutput').mockReturnValue(
       'edited-content',
     );
 

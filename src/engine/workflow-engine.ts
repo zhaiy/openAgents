@@ -24,6 +24,7 @@ interface RunOptions {
   inputData?: Record<string, unknown>;
   stream?: boolean;
   noEval?: boolean;
+  runId?: string;
 }
 
 interface RenderContext {
@@ -73,7 +74,7 @@ export class WorkflowEngine {
     this.deps.configLoader.validateReferences(agents, workflow);
 
     const plan = this.dagParser.parse(workflow.steps);
-    const runId = this.deps.stateManager.generateRunId();
+    const runId = options?.runId ?? this.deps.stateManager.generateRunId();
     const state = this.deps.stateManager.initRun(runId, workflow.workflow.id, input, plan.order, options?.inputData);
     return this.executeWorkflow({
       projectConfig,
@@ -590,17 +591,36 @@ export class WorkflowEngine {
       });
 
       if (step.gate === 'approve') {
+        this.deps.stateManager.updateStep(state, step.id, {
+          status: 'gate_waiting',
+        });
         logger.log('gate.waiting', { stepId: step.id, gateType: 'approve' });
         this.deps.eventHandler.onGateWaiting(step.id, finalOutput, previewLines);
-        const decision = await this.deps.gateManager.handleGate(step.id, 'approve', finalOutput);
+        const decision = await this.deps.gateManager.handleGate(step.id, 'approve', finalOutput, {
+          runId: state.runId,
+        });
+        logger.log('gate.resolved', {
+          stepId: step.id,
+          action: decision.action,
+        });
         if (decision.action === 'abort') {
+          this.deps.stateManager.updateStep(state, step.id, {
+            status: 'interrupted',
+            completedAt: Date.now(),
+          });
           logger.log('gate.rejected', { stepId: step.id });
           throw new GateRejectError(step.id);
         }
         if (decision.action === 'edit') {
           this.deps.outputWriter.writeStepOutput(runDir, step.id, decision.editedOutput, customFilename);
+          this.deps.stateManager.updateStep(state, step.id, {
+            status: 'completed',
+          });
           logger.log('gate.edited', { stepId: step.id });
         } else {
+          this.deps.stateManager.updateStep(state, step.id, {
+            status: 'completed',
+          });
           logger.log('gate.approved', { stepId: step.id });
         }
       }

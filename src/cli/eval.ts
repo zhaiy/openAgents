@@ -58,10 +58,10 @@ export function createEvalCommand(): Command {
         });
 
         console.log(`\n📊 ${t(locale, 'evalResultTitle')}`);
-        console.log(t(locale, 'evalScore', { score: evalResult.score }));
+        console.log(t(locale, 'evalScore', { score: String(evalResult.score) }));
         console.log(t(locale, 'evalDimensions'));
         for (const [name, result] of Object.entries(evalResult.dimensions)) {
-          console.log(t(locale, 'evalDimensionScore', { name, score: result.score, reason: result.reason }));
+          console.log(t(locale, 'evalDimensionScore', { name, score: String(result.score), reason: result.reason }));
         }
         if (evalResult.comparedToLast) {
           const delta = evalResult.comparedToLast.scoreDelta;

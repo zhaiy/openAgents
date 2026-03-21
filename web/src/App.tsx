@@ -1,0 +1,26 @@
+import { Routes, Route, Navigate } from 'react-router-dom';
+import Layout from './components/Layout';
+import HomePage from './pages/HomePage';
+import WorkflowsPage from './pages/WorkflowsPage';
+import WorkflowRunPage from './pages/WorkflowRunPage';
+import RunsPage from './pages/RunsPage';
+import RunDetailPage from './pages/RunDetailPage';
+import SettingsPage from './pages/SettingsPage';
+
+function App() {
+  return (
+    <Routes>
+      <Route path="/" element={<Layout />}>
+        <Route index element={<HomePage />} />
+        <Route path="workflows" element={<WorkflowsPage />} />
+        <Route path="workflows/:workflowId/run" element={<WorkflowRunPage />} />
+        <Route path="runs" element={<RunsPage />} />
+        <Route path="runs/:runId" element={<RunDetailPage />} />
+        <Route path="settings" element={<SettingsPage />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Route>
+    </Routes>
+  );
+}
+
+export default App;

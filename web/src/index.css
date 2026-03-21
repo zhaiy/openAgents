@@ -1,0 +1,131 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: #f5f3ef;
+  --panel: #fbfaf8;
+  --text: #161616;
+  --muted: #6b6b6b;
+  --line: #e7e2d9;
+  --brand: #0f3d3e;
+  --brand-light: rgba(15, 61, 62, 0.1);
+  --success: #1f7a52;
+  --success-light: rgba(31, 122, 82, 0.1);
+  --warning: #b7791f;
+  --warning-light: rgba(183, 121, 31, 0.1);
+  --danger: #b33a3a;
+  --danger-light: rgba(179, 58, 58, 0.1);
+}
+
+.dark {
+  --bg: #161616;
+  --panel: #1f1f1f;
+  --text: #f5f3ef;
+  --muted: #9a9a9a;
+  --line: #333333;
+  --brand: #2dd4bf;
+  --brand-light: rgba(45, 212, 191, 0.1);
+  --success: #34d399;
+  --success-light: rgba(52, 211, 153, 0.1);
+  --warning: #fbbf24;
+  --warning-light: rgba(251, 191, 36, 0.1);
+  --danger: #f87171;
+  --danger-light: rgba(248, 113, 113, 0.1);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  background-color: var(--bg);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Responsive container */
+@layer components {
+  .container {
+    @apply max-w-6xl mx-auto px-4 sm:px-6;
+  }
+
+  .btn-primary {
+    @apply px-4 py-2 bg-brand text-white rounded-lg font-medium hover:opacity-90 transition-opacity disabled:opacity-50;
+  }
+
+  .btn-secondary {
+    @apply px-4 py-2 border border-line rounded-lg font-medium hover:bg-panel transition-colors;
+  }
+
+  .card {
+    @apply bg-panel rounded-xl border border-line p-6;
+  }
+
+  .input {
+    @apply w-full px-4 py-3 bg-panel border border-line rounded-lg text-text placeholder:text-muted focus:outline-none focus:border-brand transition-colors;
+  }
+
+  .badge {
+    @apply px-2 py-1 text-xs rounded;
+  }
+
+  .badge-success {
+    background-color: var(--success-light);
+    color: var(--success);
+  }
+
+  .badge-danger {
+    background-color: var(--danger-light);
+    color: var(--danger);
+  }
+
+  .badge-warning {
+    background-color: var(--warning-light);
+    color: var(--warning);
+  }
+
+  .badge-brand {
+    background-color: var(--brand-light);
+    color: var(--brand);
+  }
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--muted);
+}
+
+/* Focus visible for accessibility */
+:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
+/* Animations */
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.animate-pulse-slow {
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}

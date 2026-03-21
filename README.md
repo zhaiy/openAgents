@@ -1,42 +1,74 @@
 # OpenAgents
 
-Transparent and controllable multi-agent orchestration engine.
+Transparent, controllable multi-agent workflow orchestration for the terminal.
 
-中文文档请查看 `README.zh-CN.md`.
+[中文文档](./README.zh-CN.md)
 
-## Core Values
+## Why OpenAgents
 
-- **Visible**: track workflow progress step by step.
-- **Controllable**: inspect and intervene before wasting tokens.
-- **Traceable**: outputs and run states are persisted for replay.
+OpenAgents is built for workflows where "just run the agents" is not enough.
+You can inspect progress in real time, pause at critical gates, resume interrupted runs, evaluate outcomes, and keep every step traceable on disk.
 
-## Key Features
+### Core Principles
 
-- Real-time progress UI in terminal (`ora` + `chalk` + `boxen`)
-- Human-in-the-loop gate (`yes/no/edit`) on critical steps
-- Gate automation options (`--auto-approve`, `--gate-timeout`)
-- Resume from interruption with persisted state (`.state.json`) and `--stream` support
-- Event logs for auditing (`events.jsonl`)
-- Parallel DAG scheduling and configurable retry strategy
-- Structured inputs (`--input-json`, `--input-file`) with `{{inputs.xxx}}`
-- Script runtime (`runtime.type: script`) for local preprocessing
-- Step post-processors (`step.post_processors`) for user-defined output filtering
-- Step cache (`workflow.cache` / `step.cache`) and `openagents cache` commands
-- Developer tools: `openagents debug template`, `openagents dag`, `openagents validate --verbose`
+- **Visible**: execution progress is shown step by step.
+- **Controllable**: critical steps can be reviewed, approved, edited, or resumed.
+- **Traceable**: outputs, logs, run state, and evaluation results are persisted locally.
+
+## Highlights
+
+### Workflow Execution
+
+- DAG-based multi-agent orchestration with parallel scheduling
+- Human-in-the-loop gates with `yes` / `no` / `edit`
+- Gate automation via `--auto-approve` and `--gate-timeout`
+- Resume interrupted runs from persisted state
+- Streaming and non-streaming LLM execution
 - LLM function calling with multi-round tool execution
-- Context processing with auto strategy: `raw`, `truncate`, `summarize`
-- Workflow evaluation (`openagents eval <run_id>`) with LLM judge
-- Skills registry for reusable agent skill definitions
+- Script runtime for local preprocessing or custom execution
+- Step-level post-processors for output cleanup and transformation
+- Step and workflow cache for repeatable runs
+- Error recovery modes: `fail`, `skip`, `fallback`, `notify`
+
+### Prompting and Context
+
+- Plain text input plus structured input with `--input-json` and `--input-file`
+- Template variables such as `{{input}}`, `{{inputs.xxx}}`, `{{context.stepId}}`
+- Context strategies: `raw`, `truncate`, `summarize`, `auto`
+- Skills registry for reusable instructions
+
+### Developer Experience
+
+- Terminal progress UI built with `ora`, `chalk`, and `boxen`
+- Config validation with schema and advanced checks
+- Template preview via `openagents debug template`
+- DAG visualization via `openagents dag`
+- Debug HTTP server via `openagents debug server`
+- Run inspection commands for status, logs, and evaluation history
+- Built-in workflow evaluation and trend analysis
+
+### Provider Compatibility
+
+- OpenAI-compatible `llm-direct` runtime
+- Automatic fallback for providers that return reasoning output in `reasoning_content`
+- Automatic adaptation when a "streaming" request returns normal JSON instead of SSE
 
 ## Quick Start
+
+### 1. Install
 
 ```bash
 npm install
 npm run build
+```
+
+### 2. Run from source
+
+```bash
 npx tsx src/cli/index.ts run novel_writing --input "A time-travel mystery"
 ```
 
-Initialize a starter project:
+### 3. Or initialize a starter project
 
 ```bash
 npx tsx src/cli/index.ts init my-project
@@ -45,43 +77,177 @@ export OPENAGENTS_API_KEY=sk-xxxx
 npx tsx src/cli/index.ts run novel_writing --input "A time-travel mystery"
 ```
 
-## CLI Commands
+## Starter Templates
+
+OpenAgents currently ships with these `init` templates:
+
+| Template | Purpose |
+| --- | --- |
+| `default` | General-purpose starter project |
+| `chatbot` | Conversational agent workflow |
+| `web-scraper` | Extract and summarize web content |
+
+List available templates:
+
+```bash
+openagents init --list-templates
+```
+
+Use a specific template:
+
+```bash
+openagents init my-project --template chatbot
+```
+
+## Common Commands
+
+### Project Setup and Validation
 
 ```bash
 openagents init [directory]
-openagents init --list-templates
 openagents init [directory] --template <name>
+openagents init --list-templates
 openagents validate
 openagents validate --verbose
+```
+
+### Running Workflows
+
+```bash
 openagents run <workflow_id> --input "..."
-openagents run <workflow_id> --input-json '{"key":"value"}'
+openagents run <workflow_id> --input-json '{"topic":"climate"}'
 openagents run <workflow_id> --input-file ./input.json
+openagents run <workflow_id> --stream
 openagents run <workflow_id> --auto-approve
+openagents run <workflow_id> --gate-timeout 30
+openagents run <workflow_id> --no-eval
 openagents resume <run_id>
 openagents resume <run_id> --stream
-openagents eval <run_id>
+```
+
+### Inspecting Runs
+
+```bash
 openagents runs list
+openagents runs list --workflow <workflow_id>
+openagents runs list --eval
 openagents runs show <run_id>
 openagents runs logs <run_id>
-openagents agents list
-openagents workflows list
-openagents debug template <workflow_id> --input-json '{"key":"value"}'
-openagents dag <workflow_id>
-openagents cache stats
-openagents cache clear
+openagents eval <run_id>
 openagents analyze <workflow_id>
 ```
 
-## Error Recovery
+### Exploring the Project
 
-- `on_failure: fail` (default): fail the workflow.
-- `on_failure: skip`: mark current step as skipped and continue downstream.
-- `on_failure: fallback`: retry with `fallback_agent`.
-- `on_failure: notify`: send `notify.webhook` then fail.
+```bash
+openagents agents list
+openagents agents list --skills
+openagents workflows list
+openagents dag <workflow_id>
+openagents debug template <workflow_id> --input-json '{"key":"value"}'
+openagents debug server
+openagents cache stats
+openagents cache clear
+```
 
-## Step Post-Processors (Script)
+## Typical Workflow
 
-Use `post_processors` on a step to transform the step output before it is written and passed downstream.
+```mermaid
+flowchart LR
+  A["Define agents and workflows"] --> B["Validate config"]
+  B --> C["Run workflow"]
+  C --> D{"Gate?"}
+  D -->|Approve/Edit| E["Continue execution"]
+  D -->|Pause| F["Resume later"]
+  E --> G["Persist outputs and logs"]
+  G --> H["Evaluate and analyze runs"]
+```
+
+## Architecture
+
+```mermaid
+flowchart TB
+  U["User / CLI"] --> CLI["CLI Commands\nrun / resume / validate / eval / debug"]
+  CLI --> CFG["Config Loader\nopenagents.yaml / agents / workflows / skills"]
+  CLI --> ENG["Workflow Engine"]
+
+  CFG --> ENG
+  ENG --> DAG["DAG Parser & Scheduler"]
+  ENG --> GATE["Gate Manager"]
+  ENG --> CACHE["Step Cache"]
+  ENG --> STATE["State Manager"]
+  ENG --> OUT["Output Writer & Event Logger"]
+  ENG --> EVAL["Eval Runner"]
+
+  DAG --> RT["Runtime Factory"]
+  RT --> LLM["LLM Direct Runtime"]
+  RT --> SCRIPT["Script Runtime"]
+
+  LLM --> PROVIDER["LLM Provider API\nstreaming / non-streaming"]
+  SCRIPT --> LOCAL["Local Scripts / Tools"]
+
+  OUT --> FILES["Run Directory\noutputs / events.jsonl / eval.json"]
+  STATE --> FILES
+  EVAL --> FILES
+```
+
+In practice, the CLI loads project config, the workflow engine builds an execution plan, runtimes execute each step, and all outputs, logs, and evaluation artifacts are persisted into the run directory for replay and inspection.
+
+## Example Workflow Features
+
+### Structured Input
+
+```yaml
+steps:
+  - id: plan
+    agent: planner
+    task: "Create a plan for {{inputs.topic}} in {{inputs.language}}."
+```
+
+Run it with:
+
+```bash
+openagents run report --input-json '{"topic":"AI safety","language":"English"}'
+```
+
+### Context Processing
+
+```yaml
+steps:
+  - id: research
+    agent: researcher
+    task: "Gather background information"
+
+  - id: write
+    agent: writer
+    depends_on: [research]
+    context:
+      from: research
+      strategy: auto
+      max_tokens: 1000
+      inject_as: system
+    task: "Write using: {{context.research}}"
+```
+
+### Error Recovery
+
+```yaml
+steps:
+  - id: summarize
+    agent: writer
+    on_failure: fallback
+    fallback_agent: backup_writer
+    task: "Summarize the research"
+```
+
+Supported `on_failure` modes:
+
+- `fail`: stop the workflow
+- `skip`: skip this step and continue downstream when possible
+- `fallback`: retry with `fallback_agent`
+- `notify`: send `notify.webhook` and fail
+
+### Step Post-Processors
 
 ```yaml
 steps:
@@ -94,61 +260,20 @@ steps:
         command: node scripts/shrink-context.mjs
         timeout_ms: 5000
         max_output_chars: 20000
-        on_error: fail # fail | skip | passthrough
+        on_error: fail
 ```
 
-Script contract:
+Script processor contract:
 
-- Input: raw step output via `stdin` (UTF-8 text)
-- Output: processed content via `stdout`
-- Logs: `stderr` is for logging only
-- Exit code `0` means success, non-zero means failure
+- Input is provided through `stdin`
+- Output is read from `stdout`
+- Logs should go to `stderr`
+- Exit code `0` means success
 - Available env vars: `OA_RUN_ID`, `OA_WORKFLOW_ID`, `OA_STEP_ID`, `OA_PROCESSOR_NAME`
 
-`on_error` behavior:
+## Evaluation and Analysis
 
-- `fail` (default): fail current step.
-- `skip`: skip this processor and continue with the current output.
-- `passthrough`: stop the processor chain and return original output from the agent.
-
-Best practices:
-
-- Keep scripts idempotent and deterministic; same input should produce same output.
-- Keep scripts lightweight; avoid external network dependencies in processing path.
-- Prefer `on_error: fail` for strict workflows, `passthrough` for best-effort cleanup.
-- Always bound execution with `timeout_ms` and `max_output_chars`.
-- Log diagnostics to `stderr`, keep only final transformed payload in `stdout`.
-- Treat scripts as trusted code in production and review them like application code.
-
-## Context Processing
-
-When a step depends on output from a previous step, use `context` to control how that output is processed:
-
-```yaml
-steps:
-  - id: research
-    agent: researcher
-    task: "Gather information"
-  - id: write
-    agent: writer
-    depends_on: [research]
-    context:
-      from: research
-      strategy: auto      # raw | truncate | summarize | auto
-      max_tokens: 1000
-      inject_as: system   # system | user
-    task: "Write based on: {{context.research}}"
-```
-
-Strategies:
-- `raw`: pass through the full output
-- `truncate`: cut to `max_tokens`
-- `summarize`: use LLM to summarize to `max_tokens` (uses English prompts)
-- `auto`: automatically select based on content size thresholds
-
-## Workflow Evaluation
-
-Evaluate workflow runs with LLM judge:
+OpenAgents can evaluate completed runs with an LLM judge and compare them with previous results.
 
 ```yaml
 workflow:
@@ -162,18 +287,19 @@ workflow:
         prompt: "Assess the overall quality of the output"
 ```
 
+Useful commands:
+
 ```bash
 openagents eval <run_id>
+openagents runs list --eval
+openagents analyze <workflow_id>
 ```
-
-Eval results are saved to `eval.json` with `runId`, `workflowId`, `evaluatedAt`, score, and dimension breakdowns.
 
 ## Skills Registry
 
-Define reusable skills in `skills/` directory:
+Define reusable skills in `skills/`:
 
 ```yaml
-# skills/math.yaml
 skill:
   id: math
   name: Math Helper
@@ -181,51 +307,81 @@ skill:
   version: 1.0
 
 instructions: |
-  You are a math assistant. Calculate precisely and show work.
+  You are a math assistant. Calculate precisely and show your work.
 
 output_format: Return JSON with "result" and "steps" fields.
 ```
 
-Skills are injected into agent context as `{{skills.skillId.instructions}}`.
+Use skills through template injection:
 
-Multi-processor chain example:
-
-```yaml
-steps:
-  - id: load_context
-    agent: planner
-    task: "Generate context data"
-    post_processors:
-      - type: script
-        name: normalize
-        command: node scripts/post-processors/normalize-output.mjs
-        on_error: fail
-      - type: script
-        name: trim
-        command: node scripts/post-processors/trim-context.mjs
-        timeout_ms: 3000
-        max_output_chars: 8000
-        on_error: passthrough
+```text
+{{skills.math.instructions}}
 ```
+
+## Web UI (Beta)
+
+OpenAgents includes a local-first Web UI for running and monitoring workflows.
+
+### Quick Start
+
+```bash
+# Terminal 1: Start the backend API server
+npm run web
+
+# Terminal 2: Start the frontend dev server
+npm run web:dev
+
+# Open http://localhost:5173 in your browser
+```
+
+### Web UI Features
+
+- **Home**: Dashboard with quick actions and recent runs
+- **Workflows**: Browse and run workflow templates
+- **Runs**: View run history with status filtering
+- **Run Detail**: Real-time streaming output, step timeline, gate approval
+- **Settings**: Language selection, environment status
+
+### API Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/health` | Health check |
+| GET | `/api/workflows` | List workflows |
+| GET | `/api/workflows/:id` | Get workflow details |
+| POST | `/api/runs` | Start a new run |
+| GET | `/api/runs` | List runs |
+| GET | `/api/runs/:id` | Get run details |
+| GET | `/api/runs/:id/events` | Get run events |
+| GET | `/api/runs/:id/stream` | SSE event stream |
+| POST | `/api/runs/:id/resume` | Resume interrupted run |
+| POST | `/api/runs/:id/gates/:stepId/action` | Submit gate action |
+| GET | `/api/settings` | Get settings |
 
 ## Project Layout
 
-- `src/cli`: CLI commands and entrypoint.
-- `src/config`: YAML loading and schema validation.
-- `src/engine`: DAG parsing, scheduling, template rendering, workflow execution.
-- `src/runtime`: runtime interface and implementations (`llm-direct`, `script`).
-- `src/output`: local output writer.
-- `src/i18n`: English/Chinese message catalogs (default: English).
-- `templates`: starter project templates.
+```text
+src/
+  cli/        CLI commands
+  config/     YAML loading and validation
+  engine/     scheduling, execution, caching, state
+  runtime/    llm-direct and script runtimes
+  output/     files, logs, notifications
+  eval/       evaluation runner and judge logic
+  ui/         terminal rendering
+  app/        application services (web API layer)
+  web/        web server and routes
+web/
+  src/        React frontend application
+templates/    starter project templates
+docs/         design notes, roadmap, progress tracking
+```
 
-## Internationalization
+## Language Support
 
-- Supported languages: `en`, `zh`.
-- Default language: `en`.
-- Language priority:
-  - `--lang`
-  - `OPENAGENTS_LANG`
-  - fallback `en`
+- Supported locales: `en`, `zh`
+- Default locale: `en`
+- Priority order: `--lang` > `OPENAGENTS_LANG` > fallback `en`
 
 Examples:
 
@@ -236,9 +392,12 @@ OPENAGENTS_LANG=zh npx tsx src/cli/index.ts run novel_writing --input "悬疑故
 
 ## Documentation
 
-- Product requirements: `docs/PRD-v3.md`
-- Technical design and development plan: `docs/TECHNICAL-DESIGN.md`
-- Chinese README: `README.zh-CN.md`
+- [Chinese README](./README.zh-CN.md)
+- [Technical design](./docs/TECHNICAL-DESIGN.md)
+- [Web UI technical design](./docs/TECHNICAL-DESIGN-WEBUI.md)
+- [Web UI MVP tasks](./docs/WEBUI-MVP-TASKS.md)
+- [Development progress](./docs/PROGRESS.md)
+- [Feature roadmap](./docs/FEATURE-ROADMAP.md)
 
 ## License
 

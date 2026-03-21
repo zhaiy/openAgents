@@ -25,6 +25,7 @@ import { createDagCommand } from './dag.js';
 import { createCacheCommand } from './cache.js';
 import { createEvalCommand } from './eval.js';
 import { createAnalyzeCommand } from './analyze.js';
+import { createWebCommand } from './web.js';
 
 const program = new Command();
 
@@ -48,5 +49,6 @@ program.addCommand(createWorkflowsCommand());
 program.addCommand(createDebugCommand());
 program.addCommand(createDagCommand());
 program.addCommand(createCacheCommand());
+program.addCommand(createWebCommand());
 
 program.parse();
