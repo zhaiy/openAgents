@@ -110,6 +110,13 @@ const StepConfigSchemaBase = z.object({
   id: z.string().regex(idRegex, 'must start with lowercase letter and only contain a-z, 0-9, _ or -'),
   agent: z.string().regex(idRegex, 'must start with lowercase letter and only contain a-z, 0-9, _ or -'),
   task: z.string().min(1),
+  metadata: z
+    .object({
+      displayName: z.string().min(1).optional(),
+      description: z.string().min(1).optional(),
+      tags: z.array(z.string().min(1)).optional(),
+    })
+    .optional(),
   depends_on: z.array(z.string()).optional(),
   gate: z.enum(['auto', 'approve']).optional(),
   retry: RetryConfigSchema.optional(),
@@ -180,6 +187,13 @@ export const WorkflowConfigSchema = z
       id: z.string().regex(idRegex, 'must start with lowercase letter and only contain a-z, 0-9, _ or -'),
       name: z.string().min(1),
       description: z.string().min(1),
+      metadata: z
+        .object({
+          displayName: z.string().min(1).optional(),
+          description: z.string().min(1).optional(),
+          tags: z.array(z.string().min(1)).optional(),
+        })
+        .optional(),
     }),
     steps: z.array(StepConfigSchema).min(1),
     output: z.object({

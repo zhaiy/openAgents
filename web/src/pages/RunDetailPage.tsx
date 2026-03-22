@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useTranslation } from '../i18n';
 import { useApi } from '../hooks/useApi';
 import { runApi, createSSEConnection, type RunEvent, type Step } from '../api';
@@ -8,6 +8,7 @@ type Tab = 'steps' | 'output' | 'logs' | 'eval';
 
 export default function RunDetailPage() {
   const { runId } = useParams<{ runId: string }>();
+  const navigate = useNavigate();
   const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState<Tab>('steps');
   const [streamBuffer, setStreamBuffer] = useState<Record<string, string>>({});
@@ -113,13 +114,33 @@ export default function RunDetailPage() {
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8 sm:py-12">
       <header className="mb-8">
-        <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-2">
-          <h2 className="text-2xl font-semibold text-text">{run.workflowName}</h2>
-          <span className={`badge ${getStatusBadgeClass(run.status)}`}>
-            {t(`status.${run.status}`)}
-          </span>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-2">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+            <h2 className="text-2xl font-semibold text-text">{run.workflowName}</h2>
+            <span className={`badge ${getStatusBadgeClass(run.status)}`}>
+              {t(`status.${run.status}`)}
+            </span>
+          </div>
+          {/* Re-run Actions */}
+          <div className="flex items-center gap-2">
+            <Link
+              to={`/workflows/${run.workflowId}/run`}
+              state={{ sourceRunId: run.runId }}
+              className="px-3 py-1.5 text-sm bg-blue-100 hover:bg-blue-200 dark:bg-blue-900/30 dark:hover:bg-blue-900/50 text-blue-700 dark:text-blue-300 rounded-lg transition-colors"
+            >
+              ↻ {t('rerun.editAndRerun')}
+            </Link>
+            <button
+              onClick={() => navigate(`/runs/${run.runId}/execute`)}
+              className="px-3 py-1.5 text-sm bg-panel hover:bg-gray-100 dark:bg-gray-800 dark:hover:bg-gray-700 border border-line rounded-lg transition-colors"
+            >
+              📊 {t('rerun.viewInConsole')}
+            </button>
+          </div>
         </div>
-        <p className="text-sm text-muted">{t('runDetail.runId')}: {run.runId}</p>
+        <div className="flex items-center justify-between">
+          <p className="text-sm text-muted">{t('runDetail.runId')}: {run.runId}</p>
+        </div>
       </header>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 lg:gap-8">

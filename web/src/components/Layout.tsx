@@ -56,6 +56,14 @@ export default function Layout() {
                 {t('nav.runs')}
               </NavLink>
               <NavLink
+                to="/diagnostics"
+                className={({ isActive }) =>
+                  `text-sm transition-colors ${isActive ? 'text-text font-medium' : 'text-muted hover:text-text'}`
+                }
+              >
+                {t('nav.diagnostics')}
+              </NavLink>
+              <NavLink
                 to="/settings"
                 className={({ isActive }) =>
                   `text-sm transition-colors ${isActive ? 'text-text font-medium' : 'text-muted hover:text-text'}`
@@ -95,6 +103,15 @@ export default function Layout() {
                 }
               >
                 {t('nav.runs')}
+              </NavLink>
+              <NavLink
+                to="/diagnostics"
+                onClick={() => setMobileMenuOpen(false)}
+                className={({ isActive }) =>
+                  `text-sm transition-colors ${isActive ? 'text-text font-medium' : 'text-muted hover:text-text'}`
+                }
+              >
+                {t('nav.diagnostics')}
               </NavLink>
               <NavLink
                 to="/settings"

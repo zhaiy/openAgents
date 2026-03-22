@@ -11,6 +11,12 @@ import { RunRegistry } from './services/run-registry.js';
 import { RunService } from './services/run-service.js';
 import { SettingsService } from './services/settings-service.js';
 import { WorkflowService } from './services/workflow-service.js';
+import { WorkflowVisualService } from './services/workflow-visual-service.js';
+import { RunVisualService } from './services/run-visual-service.js';
+import { ConfigDraftService } from './services/config-draft-service.js';
+import { RunCompareService } from './services/run-compare-service.js';
+import { DiagnosticsService } from './services/diagnostics-service.js';
+import { RunReuseService } from './services/run-reuse-service.js';
 
 export interface WebAppContext {
   loader: ConfigLoader;
@@ -19,6 +25,12 @@ export interface WebAppContext {
   gateService: GateService;
   settingsService: SettingsService;
   runEventEmitter: RunEventEmitter;
+  workflowVisualService: WorkflowVisualService;
+  runVisualService: RunVisualService;
+  configDraftService: ConfigDraftService;
+  runCompareService: RunCompareService;
+  diagnosticsService: DiagnosticsService;
+  runReuseService: RunReuseService;
 }
 
 export function buildWebContext(projectRoot: string = process.cwd()): WebAppContext {
@@ -51,6 +63,14 @@ export function buildWebContext(projectRoot: string = process.cwd()): WebAppCont
   });
   const gateService = new GateService(gateProvider, runRegistry);
 
+  // Visual services
+  const workflowVisualService = new WorkflowVisualService(loader);
+  const runVisualService = new RunVisualService(stateManager);
+  const configDraftService = new ConfigDraftService(projectRoot);
+  const runCompareService = new RunCompareService(stateManager);
+  const diagnosticsService = new DiagnosticsService(stateManager);
+  const runReuseService = new RunReuseService(stateManager, loader);
+
   return {
     loader,
     workflowService,
@@ -58,5 +78,11 @@ export function buildWebContext(projectRoot: string = process.cwd()): WebAppCont
     gateService,
     settingsService,
     runEventEmitter,
+    workflowVisualService,
+    runVisualService,
+    configDraftService,
+    runCompareService,
+    diagnosticsService,
+    runReuseService,
   };
 }

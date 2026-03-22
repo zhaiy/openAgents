@@ -92,10 +92,23 @@ export interface StepContextConfig {
   inject_as?: 'system' | 'user';
 }
 
+export interface WorkflowMetadata {
+  displayName?: string;
+  description?: string;
+  tags?: string[];
+}
+
+export interface StepMetadata {
+  displayName?: string;
+  description?: string;
+  tags?: string[];
+}
+
 export interface StepConfig {
   id: string;
   agent: string;
   task: string;
+  metadata?: StepMetadata;
   depends_on?: string[];
   gate?: GateType;
   retry?: RetryConfig;
@@ -117,6 +130,7 @@ export interface WorkflowConfig {
     id: string;
     name: string;
     description: string;
+    metadata?: WorkflowMetadata;
   };
   steps: StepConfig[];
   output: {

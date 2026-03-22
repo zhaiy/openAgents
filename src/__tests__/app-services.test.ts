@@ -47,15 +47,22 @@ describe('App Services', () => {
   describe('WorkflowService', () => {
     it('returns list of workflows', () => {
       const workflows: WorkflowSummaryDto[] = [
-        { id: 'wf1', name: 'Workflow 1', description: 'Desc 1', stepCount: 3, hasEval: true },
-        { id: 'wf2', name: 'Workflow 2', description: 'Desc 2', stepCount: 2, hasEval: false },
+        { id: 'wf1', name: 'Workflow 1', description: 'Desc 1', stepCount: 3, hasGate: true, hasEval: true },
+        { id: 'wf2', name: 'Workflow 2', description: 'Desc 2', stepCount: 2, hasGate: false, hasEval: false },
       ];
       mockWorkflowService.listWorkflows.mockReturnValue(workflows);
       expect(mockWorkflowService.listWorkflows()).toEqual(workflows);
     });
 
     it('returns single workflow by id', () => {
-      const workflow: WorkflowSummaryDto = { id: 'wf1', name: 'Workflow 1', description: 'Desc', stepCount: 3, hasEval: true };
+      const workflow: WorkflowSummaryDto = {
+        id: 'wf1',
+        name: 'Workflow 1',
+        description: 'Desc',
+        stepCount: 3,
+        hasGate: true,
+        hasEval: true,
+      };
       mockWorkflowService.getWorkflow.mockReturnValue(workflow);
       expect(mockWorkflowService.getWorkflow('wf1')).toEqual(workflow);
     });

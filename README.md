@@ -336,11 +336,16 @@ npm run web:dev
 
 ### Web UI Features
 
-- **Home**: Dashboard with quick actions and recent runs
-- **Workflows**: Browse and run workflow templates
-- **Runs**: View run history with status filtering
-- **Run Detail**: Real-time streaming output, step timeline, gate approval
-- **Settings**: Language selection, environment status
+- **Home**: Dashboard with "Needs Attention" section (failed runs, waiting gates), quick actions, recent runs
+- **Workflows**: Browse and run workflow templates with search and eval filtering
+- **Workflow Overview**: Interactive DAG visualization with node details and input schema
+- **Run Execution Console**: Real-time DAG visualization with live node status updates, timeline, and streaming output
+- **Gate Handling**: Modal dialog for approve/reject/edit decisions with output preview
+- **Run Detail**: Step-level details with output preview, logs, token usage, and evaluation
+- **Diagnostics**: Failed runs and waiting gates monitoring with quick actions
+- **Run Comparison**: Side-by-side comparison of two runs with status, duration, and token usage diffs
+- **Re-run**: Quick rerun with same config or edit-and-rerun with modified inputs
+- **Settings**: Language selection (English/Chinese), environment readiness, default runtime options
 
 ### API Endpoints
 
@@ -349,13 +354,21 @@ npm run web:dev
 | GET | `/api/health` | Health check |
 | GET | `/api/workflows` | List workflows |
 | GET | `/api/workflows/:id` | Get workflow details |
+| GET | `/api/workflows/:id/visual-summary` | Get workflow DAG visualization data |
 | POST | `/api/runs` | Start a new run |
 | GET | `/api/runs` | List runs |
 | GET | `/api/runs/:id` | Get run details |
+| GET | `/api/runs/:id/visual-state` | Get run visual state (node statuses, active nodes) |
+| GET | `/api/runs/:id/timeline` | Get run timeline events |
 | GET | `/api/runs/:id/events` | Get run events |
-| GET | `/api/runs/:id/stream` | SSE event stream |
+| GET | `/api/runs/:id/stream` | SSE event stream with sequence numbering |
 | POST | `/api/runs/:id/resume` | Resume interrupted run |
+| POST | `/api/runs/:id/rerun` | Re-run with same or modified config |
 | POST | `/api/runs/:id/gates/:stepId/action` | Submit gate action |
+| GET | `/api/diagnostics/failed-runs` | Get all failed runs |
+| GET | `/api/diagnostics/waiting-gates` | Get all waiting gates |
+| GET | `/api/diagnostics/runs/:id` | Get run diagnostics |
+| GET | `/api/runs/compare` | Compare two runs |
 | GET | `/api/settings` | Get settings |
 
 ## Project Layout
@@ -395,7 +408,7 @@ OPENAGENTS_LANG=zh npx tsx src/cli/index.ts run novel_writing --input "悬疑故
 - [Chinese README](./README.zh-CN.md)
 - [Technical design](./docs/TECHNICAL-DESIGN.md)
 - [Web UI technical design](./docs/TECHNICAL-DESIGN-WEBUI.md)
-- [Web UI MVP tasks](./docs/WEBUI-MVP-TASKS.md)
+- [Web UI v6 tasks](./docs/WEBUI-V6-TASKS.md)
 - [Development progress](./docs/PROGRESS.md)
 - [Feature roadmap](./docs/FEATURE-ROADMAP.md)
 

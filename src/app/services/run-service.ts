@@ -91,31 +91,53 @@ export class RunService {
     });
   }
 
-  getRun(runId: string): RunDetailDto {
+  getRun(runId: string): RunDetailDto & { workflowName: string; createdAt: string } {
     const run = this.deps.stateManager.findRunById(runId);
+
+    // Load workflow to get name
+    let workflowName = run.workflowId;
+    try {
+      const workflow = this.deps.loader.loadWorkflow(run.workflowId);
+      workflowName = workflow.workflow.name ?? workflowName;
+    } catch {
+      // Use workflowId as fallback if loading fails
+    }
+
+    // Transform steps from Record to Array with frontend-compatible field names
+    const stepsArray = Object.entries(run.steps).map(([stepId, step]) => {
+      let output: string | undefined;
+      if (step.outputFile) {
+        try {
+          output = this.getStepOutput(runId, stepId);
+        } catch {
+          output = undefined;
+        }
+      }
+
+      return {
+        stepId,
+        name: stepId, // stepId serves as the name when no separate name exists
+        status: step.status,
+        startedAt: step.startedAt,
+        completedAt: step.completedAt,
+        output,
+        error: step.error,
+        durationMs: step.durationMs,
+        tokenUsage: step.tokenUsage,
+      };
+    });
+
     return {
       runId: run.runId,
       workflowId: run.workflowId,
+      workflowName,
       status: run.status,
       input: run.input,
       inputData: run.inputData,
       startedAt: run.startedAt,
       completedAt: run.completedAt,
-      steps: Object.fromEntries(
-        Object.entries(run.steps).map(([stepId, step]) => [
-          stepId,
-          {
-            id: stepId,
-            status: step.status,
-            startedAt: step.startedAt,
-            completedAt: step.completedAt,
-            outputFile: step.outputFile,
-            error: step.error,
-            tokenUsage: step.tokenUsage,
-            durationMs: step.durationMs,
-          },
-        ]),
-      ),
+      createdAt: new Date(run.startedAt).toISOString(), // Frontend expects ISO string
+      steps: stepsArray,
     };
   }
 

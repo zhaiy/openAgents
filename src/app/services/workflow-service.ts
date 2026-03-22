@@ -13,6 +13,7 @@ export class WorkflowService {
           name: workflow.workflow.name,
           description: workflow.workflow.description,
           stepCount: workflow.steps.length,
+          hasGate: workflow.steps.some((step) => (step.gate ?? 'auto') === 'approve'),
           hasEval: !!workflow.eval?.enabled,
         }))
         .sort((a, b) => a.id.localeCompare(b.id));
