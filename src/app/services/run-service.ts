@@ -79,29 +79,34 @@ export class RunService {
     const runs = this.deps.stateManager.listRuns(filter);
     return runs.map((run) => {
       const stepStates = Object.values(run.steps);
+      const workflowName = this.getWorkflowName(run.workflowId);
+      const durationMs = run.completedAt && run.startedAt
+        ? run.completedAt - run.startedAt
+        : undefined;
+
       return {
         runId: run.runId,
         workflowId: run.workflowId,
+        workflowName,
         status: run.status,
         startedAt: run.startedAt,
         completedAt: run.completedAt,
+        durationMs,
         stepCount: stepStates.length,
         completedStepCount: stepStates.filter((step) => step.status === 'completed').length,
       };
     });
   }
 
-  getRun(runId: string): RunDetailDto & { workflowName: string; createdAt: string } {
+  getRun(runId: string): RunDetailDto {
     const run = this.deps.stateManager.findRunById(runId);
+    const workflowName = this.getWorkflowName(run.workflowId);
+    const durationMs = run.completedAt && run.startedAt
+      ? run.completedAt - run.startedAt
+      : undefined;
 
-    // Load workflow to get name
-    let workflowName = run.workflowId;
-    try {
-      const workflow = this.deps.loader.loadWorkflow(run.workflowId);
-      workflowName = workflow.workflow.name ?? workflowName;
-    } catch {
-      // Use workflowId as fallback if loading fails
-    }
+    // Calculate total token usage from all steps
+    const tokenUsage = this.calculateTotalTokenUsage(run.steps);
 
     // Transform steps from Record to Array with frontend-compatible field names
     const stepsArray = Object.entries(run.steps).map(([stepId, step]) => {
@@ -136,7 +141,8 @@ export class RunService {
       inputData: run.inputData,
       startedAt: run.startedAt,
       completedAt: run.completedAt,
-      createdAt: new Date(run.startedAt).toISOString(), // Frontend expects ISO string
+      durationMs,
+      tokenUsage,
       steps: stepsArray,
     };
   }
@@ -177,6 +183,36 @@ export class RunService {
       projectConfig,
     );
     return evalRunner.loadLastEval(run.workflowId, runId) ?? null;
+  }
+
+  private getWorkflowName(workflowId: string): string {
+    try {
+      const workflow = this.deps.loader.loadWorkflow(workflowId);
+      return workflow.workflow.name ?? workflowId;
+    } catch {
+      return workflowId;
+    }
+  }
+
+  private calculateTotalTokenUsage(steps: Record<string, { tokenUsage?: { promptTokens?: number; completionTokens?: number; totalTokens: number } }>): { promptTokens: number; completionTokens: number; totalTokens: number } | undefined {
+    const stepValues = Object.values(steps);
+    if (stepValues.length === 0) return undefined;
+
+    let promptTokens = 0;
+    let completionTokens = 0;
+    let totalTokens = 0;
+    let hasUsage = false;
+
+    for (const step of stepValues) {
+      if (step.tokenUsage) {
+        hasUsage = true;
+        promptTokens += step.tokenUsage.promptTokens ?? 0;
+        completionTokens += step.tokenUsage.completionTokens ?? 0;
+        totalTokens += step.tokenUsage.totalTokens;
+      }
+    }
+
+    return hasUsage ? { promptTokens, completionTokens, totalTokens } : undefined;
   }
 
   private buildWebEngine(opts?: { autoApprove?: boolean }): { engine: WorkflowEngine; eventHandler: WebEventHandler } {

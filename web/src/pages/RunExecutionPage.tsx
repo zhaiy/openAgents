@@ -1,17 +1,25 @@
 /**
- * RunExecutionPage - Visual Execution Console (T18)
+ * RunExecutionPage - Visual Execution Console (T18/N3)
  *
  * Real-time DAG visualization with node status updates, timeline,
  * live output streaming, and gate handling.
+ *
+ * DESIGN PRINCIPLE:
+ * - visualState (from run-store) is the SINGLE SOURCE OF TRUTH for node states
+ * - React Flow nodes are DERIVED from visualState, not maintained separately
+ * - SSE events update visualState, and React Flow re-renders accordingly
+ *
+ * N3 Enhancements:
+ * - Unified error handling for run not found (S11)
+ * - Gate action error feedback (S3/S4)
  */
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   ReactFlow,
   Background,
   Controls,
   MiniMap,
-  useNodesState,
   useEdgesState,
   type Node,
   type Edge,
@@ -22,17 +30,19 @@ import '@xyflow/react/dist/style.css';
 
 import { useTranslation } from '../i18n';
 import { useApi } from '../hooks/useApi';
+import { useApiError } from '../hooks/useApiError';
 import {
   visualApi,
   runApi,
   createSSEConnection,
   type RunEvent,
-  type RunNodeState,
   type NodeStatus,
+  type WorkflowVisualSummary,
+  ApiError,
 } from '../api';
 import { useGraphStore } from '../stores/graph-store';
 import { useRunStore } from '../stores/run-store';
-import { adaptWorkflowToFlowNodes, adaptWorkflowToFlowEdges } from '../lib/graph';
+import { adaptWorkflowToFlowEdges } from '../lib/graph';
 import { layoutDAG } from '../lib/graph';
 import { NodeCard } from '../components/nodes/NodeCard';
 import { InspectorPanel } from '../components/panels/InspectorPanel';
@@ -41,6 +51,7 @@ import { MetricCard } from '../components/panels/MetricCard';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
 import type { BadgeVariant } from '../components/ui/Badge';
+import { NotFoundState } from '../components/ui/NotFoundState';
 
 // Custom node component for React Flow
 function VisualizationNode({ data }: { data: Record<string, unknown> }) {
@@ -81,128 +92,132 @@ export default function RunExecutionPage() {
   const navigate = useNavigate();
   const { t } = useTranslation();
 
-  // Graph store - only for selection
+  // Unified error handling (N3)
+  const { isError, setError, clearError } = useApiError();
+  const [runNotFound, setRunNotFound] = useState(false);
+
+  // Graph store - only for selection (not for node state)
   const { selectNode, selectedNodeId } = useGraphStore();
 
-  // Local state for ReactFlow - using FlowNode structure
-  const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
-  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
-
-  // Run store - single source of truth for node state
+  // Run store - SINGLE SOURCE OF TRUTH for visual state
   const {
     visualState,
     timeline,
     streamBuffers,
     connectionStatus,
     pendingGate,
-    setVisualState,
-    updateNodeState,
-    setTimeline,
-    setPendingGate,
-    initRun,
+    syncFromSnapshot,
     handleSSEEvent,
     setConnectionStatus,
+    initRun,
+    setTimeline,
+    setPendingGate,
   } = useRunStore();
 
-  // Local state
+  // Local state for workflow layout (positions are not part of visual state)
+  const [workflowSummary, setWorkflowSummary] = useState<WorkflowVisualSummary | null>(null);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [activeTab, setActiveTab] = useState<TabType>('timeline');
-  const [selectedNodeData, setSelectedNodeData] = useState<RunNodeState | null>(null);
   const [editText, setEditText] = useState('');
   const [isSubmittingGate, setIsSubmittingGate] = useState(false);
   const esRef = useRef<ReturnType<typeof createSSEConnection> | null>(null);
   const streamRef = useRef<HTMLPreElement>(null);
 
-  // Fetch workflow visual summary and run visual state (single fetch, no duplication)
-  const { data: workflowSummary, isLoading: workflowLoading } = useApi(
+  // DERIVE React Flow nodes from visualState (single source of truth)
+  const nodes = useMemo(() => {
+    if (!workflowSummary || !visualState) return [];
+
+    // Apply layout to get positions
+    const layoutPositions = layoutDAG(
+      workflowSummary.visualNodes.map((n) => ({ id: n.id })),
+      workflowSummary.visualEdges.map((e) => ({ source: e.source, target: e.target })),
+      { direction: 'LR' }
+    );
+
+    // Convert visual nodes to React Flow nodes, merging with visualState
+    return workflowSummary.visualNodes.map((vn) => {
+      const nodeState = visualState.nodeStates[vn.id];
+      const position = layoutPositions.get(vn.id) ?? { x: 0, y: 0 };
+
+      return {
+        id: vn.id,
+        type: 'visualizationNode',
+        position,
+        data: {
+          id: vn.id,
+          label: vn.name,
+          type: vn.type,
+          status: nodeState?.status ?? 'pending',
+          durationMs: nodeState?.durationMs,
+          tokenUsage: nodeState?.tokenUsage,
+          errorMessage: nodeState?.errorMessage,
+          hasGate: vn.hasGate,
+          hasEval: vn.hasEval,
+          isActive: visualState.currentActiveNodeIds.includes(vn.id),
+          isFailed: visualState.failedNodeIds.includes(vn.id),
+          isGateWaiting: visualState.gateWaitingNodeIds.includes(vn.id),
+        },
+      };
+    });
+  }, [workflowSummary, visualState]);
+
+  // Fetch initial visual state and workflow summary
+  const { isLoading: workflowLoading } = useApi(
     async () => {
       if (!runId) return null;
-      const state = await visualApi.getRunVisualState(runId);
-      if (state) {
-        setVisualState(state);
+
+      try {
+        // Fetch visual state (this is the authoritative snapshot)
+        const state = await visualApi.getRunVisualState(runId);
+        if (!state) {
+          setRunNotFound(true);
+          return null;
+        }
+
+        // Initialize run store with the snapshot
         initRun(runId, state.workflowId);
-        // Get workflow summary for DAG layout
+        syncFromSnapshot(state, 0);
+
+        // Fetch workflow summary for layout
         const summary = await visualApi.getWorkflowSummary(state.workflowId);
         if (summary) {
-          // Apply layout
-          const layoutPositions = layoutDAG(
-            summary.visualNodes.map((n) => ({ id: n.id })),
-            summary.visualEdges.map((e) => ({ source: e.source, target: e.target })),
-            { direction: 'LR' }
-          );
-          // Convert to flow nodes with positions
-          const flowNodes = adaptWorkflowToFlowNodes(summary, layoutPositions);
+          setWorkflowSummary(summary);
+          // Set edges (static, from workflow definition)
           const flowEdges = adaptWorkflowToFlowEdges(summary.visualEdges);
-          setNodes(flowNodes);
           setEdges(flowEdges);
         }
-        // Get timeline
+
+        // Fetch timeline
         const timelineData = await visualApi.getRunTimeline(runId);
         if (timelineData) {
           setTimeline(timelineData);
         }
-        return { visualState: state, workflowSummary: await visualApi.getWorkflowSummary(state.workflowId) };
+
+        return { visualState: state, workflowSummary: summary };
+      } catch (err) {
+        // Handle run not found (S11)
+        if (err instanceof ApiError && err.code === 'NOT_FOUND') {
+          setRunNotFound(true);
+        } else {
+          setError(err);
+        }
+        return null;
       }
-      return null;
     },
-    [runId]
+    [runId, initRun, setEdges, setError, setTimeline, syncFromSnapshot]
   );
 
-  // Initialize run and set up SSE
+  // Set up SSE connection for real-time updates
   useEffect(() => {
     if (!runId) return;
 
-    // Set up SSE connection (visual state already fetched via useApi above)
     setConnectionStatus('connecting');
     esRef.current = createSSEConnection(
       runId,
       (event: RunEvent, eventId?: string) => {
-        // Handle SSE event in run-store (updates visualState for Inspector)
+        // All state updates go through handleSSEEvent
+        // which updates visualState (single source of truth)
         handleSSEEvent(event, eventId);
-
-        // Update React Flow nodes directly for graph visualization
-        if (event.stepId) {
-          const stepId = event.stepId;
-          let newStatus: NodeStatus | null = null;
-          const additionalUpdates: Record<string, unknown> = {};
-
-          switch (event.type) {
-            case 'step.started':
-              newStatus = 'running';
-              break;
-            case 'step.completed':
-              newStatus = 'completed';
-              if (event.durationMs) additionalUpdates.durationMs = event.durationMs;
-              if (event.output) additionalUpdates.outputPreview = event.output;
-              break;
-            case 'step.failed':
-              newStatus = 'failed';
-              if (event.error) additionalUpdates.errorMessage = event.error;
-              break;
-            case 'step.skipped':
-              newStatus = 'skipped';
-              break;
-            case 'gate.waiting':
-              newStatus = 'gate_waiting';
-              if (event.preview) additionalUpdates.outputPreview = event.preview;
-              break;
-            case 'step.stream':
-              // Stream chunks handled separately via appendStreamChunk
-              break;
-          }
-
-          if (newStatus) {
-            // Update React Flow nodes
-            setNodes((nds) =>
-              nds.map((node) =>
-                node.id === stepId
-                  ? { ...node, data: { ...node.data, status: newStatus, ...additionalUpdates } }
-                  : node
-              )
-            );
-            // Also update run-store node state
-            updateNodeState(stepId, { status: newStatus, ...additionalUpdates });
-          }
-        }
       },
       (error?: Error, retryCount?: number) => {
         console.warn('SSE error:', error?.message, 'retry:', retryCount);
@@ -217,16 +232,12 @@ export default function RunExecutionPage() {
     return () => {
       esRef.current?.close();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [runId]);
+  }, [runId, handleSSEEvent, setConnectionStatus]);
 
   // Update selected node data when selection changes
-  useEffect(() => {
-    if (selectedNodeId && visualState?.nodeStates[selectedNodeId]) {
-      setSelectedNodeData(visualState.nodeStates[selectedNodeId]);
-    } else {
-      setSelectedNodeData(null);
-    }
+  const selectedNodeData = useMemo(() => {
+    if (!selectedNodeId || !visualState?.nodeStates[selectedNodeId]) return null;
+    return visualState.nodeStates[selectedNodeId];
   }, [selectedNodeId, visualState]);
 
   // Auto-scroll stream output
@@ -246,9 +257,12 @@ export default function RunExecutionPage() {
     selectNode(null);
   }, [selectNode]);
 
-  // Gate action handler
+  // Gate action handler (N3: enhanced error feedback)
+  const [gateError, setGateError] = useState<string | null>(null);
+
   const handleGateAction = async (action: 'approve' | 'reject' | 'edit') => {
     if (!runId || !pendingGate) return;
+    setGateError(null);
     setIsSubmittingGate(true);
     try {
       await runApi.gateAction(runId, pendingGate.stepId, {
@@ -256,8 +270,14 @@ export default function RunExecutionPage() {
         editedOutput: action === 'edit' ? editText : undefined,
       });
       setPendingGate(null);
+      setEditText('');
     } catch (err) {
-      console.error('Gate action failed:', err);
+      // Enhanced error feedback (S3/S4)
+      if (err instanceof ApiError) {
+        setGateError(err.message || t('execution.gateActionFailed') || 'Gate action failed');
+      } else {
+        setGateError(t('execution.gateActionFailed') || 'Gate action failed');
+      }
     } finally {
       setIsSubmittingGate(false);
     }
@@ -279,10 +299,30 @@ export default function RunExecutionPage() {
     }
   };
 
-  // Get selected node from local nodes state
+  // Get selected node from derived nodes
   const selectedNode = selectedNodeId
     ? nodes.find((n) => n.id === selectedNodeId)
     : null;
+
+  // Handle run not found (S11)
+  if (runNotFound) {
+    return <NotFoundState type="run" identifier={runId} />;
+  }
+
+  // Handle other errors
+  if (isError && !visualState) {
+    return (
+      <NotFoundState
+        type="run"
+        identifier={runId}
+        onRetry={() => {
+          clearError();
+          setRunNotFound(false);
+          window.location.reload();
+        }}
+      />
+    );
+  }
 
   if (workflowLoading && !visualState) {
     return (
@@ -305,7 +345,7 @@ export default function RunExecutionPage() {
             </Button>
             <div>
               <h1 className="text-lg font-semibold">
-                {workflowSummary?.workflowSummary?.name || t('execution.console')}
+                {workflowSummary?.name || t('execution.console')}
               </h1>
               <p className="text-xs text-muted">
                 {t('execution.runId')}: {runId}
@@ -335,7 +375,6 @@ export default function RunExecutionPage() {
           <ReactFlow
             nodes={nodes}
             edges={edges}
-            onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
             onNodeClick={handleNodeClick}
             onPaneClick={handlePaneClick}
@@ -518,6 +557,13 @@ export default function RunExecutionPage() {
                 <p className="text-xs text-muted font-mono">{pendingGate.stepId}</p>
               </div>
             </div>
+
+            {/* Gate Error (N3) */}
+            {gateError && (
+              <div className="mb-4 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+                <p className="text-sm text-red-700 dark:text-red-300">{gateError}</p>
+              </div>
+            )}
 
             {/* Preview */}
             <div className="mb-4">

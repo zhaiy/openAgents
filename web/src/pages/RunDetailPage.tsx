@@ -229,11 +229,11 @@ export default function RunDetailPage() {
               <div className="space-y-2 text-sm">
                 <div className="flex justify-between">
                   <span className="text-muted">{t('runDetail.promptTokens')}</span>
-                  <span>{run.tokenUsage.promptTokens.toLocaleString()}</span>
+                  <span>{run.tokenUsage.promptTokens?.toLocaleString() ?? '-'}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-muted">{t('runDetail.completionTokens')}</span>
-                  <span>{run.tokenUsage.completionTokens.toLocaleString()}</span>
+                  <span>{run.tokenUsage.completionTokens?.toLocaleString() ?? '-'}</span>
                 </div>
                 <div className="flex justify-between font-medium pt-2 border-t border-line">
                   <span>{t('runDetail.totalTokens')}</span>

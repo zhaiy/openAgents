@@ -6,9 +6,13 @@ import type {
   TimelineEntry,
 } from '../dto.js';
 import type { TokenUsage } from '../dto.js';
+import type { RunEventEmitter } from '../events/run-event-emitter.js';
 
 export class RunVisualService {
-  constructor(private readonly stateManager: StateManager) {}
+  constructor(
+    private readonly stateManager: StateManager,
+    private readonly eventEmitter?: RunEventEmitter,
+  ) {}
 
   /**
    * Get visual state for a run
@@ -48,6 +52,10 @@ export class RunVisualService {
     // Calculate total token usage
     const totalTokenUsage = this.calculateTotalTokenUsage(run.steps);
 
+    // Get current sequence from event emitter for accurate lastEventId
+    const currentSequence = this.eventEmitter?.getCurrentSequence(runId) ?? 0;
+    const lastEventId = `${runId}:${currentSequence}`;
+
     return {
       runId: run.runId,
       workflowId: run.workflowId,
@@ -62,8 +70,8 @@ export class RunVisualService {
       gateWaitingNodeIds,
       failedNodeIds,
       tokenUsage: totalTokenUsage,
-      version: 1, // Initial version, will be managed by snapshot mechanism
-      lastEventId: `run:${runId}:${run.startedAt}`,
+      version: currentSequence + 1, // Version increments with each event
+      lastEventId,
     };
   }
 

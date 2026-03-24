@@ -8,13 +8,35 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from '../i18n';
 import { useApi } from '../hooks/useApi';
-import { diagnosticsApi } from '../api';
+import { diagnosticsApi, type DiagnosticsSummary, type RecommendedAction } from '../api';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
 import { Card } from '../components/ui/Card';
 import { WarningCallout } from '../components/panels/WarningCallout';
 
 type TabType = 'failed' | 'waiting';
+
+function getPriorityBadge(priority: 'high' | 'medium' | 'low'): 'error' | 'warning' | 'default' {
+  switch (priority) {
+    case 'high':
+      return 'error';
+    case 'medium':
+      return 'warning';
+    case 'low':
+      return 'default';
+  }
+}
+
+function getImpactTypeBadge(impactType: 'blocked' | 'skipped' | 'will_fail'): 'warning' | 'error' | 'default' {
+  switch (impactType) {
+    case 'blocked':
+      return 'warning';
+    case 'skipped':
+      return 'default';
+    case 'will_fail':
+      return 'error';
+  }
+}
 
 export default function DiagnosticsPage() {
   const navigate = useNavigate();
@@ -54,6 +76,15 @@ export default function DiagnosticsPage() {
   // Navigate to run diagnostics (opens execution console with diagnostics focus)
   const handleViewDiagnostics = (runId: string) => {
     setSelectedRunId(runId);
+  };
+
+  // Handle recommended action
+  const handleAction = (action: RecommendedAction) => {
+    if (action.type === 'rerun' || action.type === 'rerun_with_edits') {
+      navigate(`/runs/${action.targetRunId}/rerun`);
+    } else if (action.type === 'check_api') {
+      navigate('/settings');
+    }
   };
 
   // Format timestamp
@@ -187,59 +218,11 @@ export default function DiagnosticsPage() {
                 <div className="w-6 h-6 border-2 border-brand border-t-transparent rounded-full animate-spin" />
               </div>
             ) : diagnosticsDetail ? (
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                <div className="space-y-4 text-sm">
-                  <div>
-                    <h3 className="font-medium mb-2">{t('diagnostics.failedNodes')}</h3>
-                    <p className="text-muted">
-                      {diagnosticsDetail.failedNodeIds.length > 0 ? diagnosticsDetail.failedNodeIds.join(', ') : '-'}
-                    </p>
-                  </div>
-                  <div>
-                    <h3 className="font-medium mb-2">{t('diagnostics.gateWaitingNodes')}</h3>
-                    <p className="text-muted">
-                      {diagnosticsDetail.gateWaitingNodeIds.length > 0 ? diagnosticsDetail.gateWaitingNodeIds.join(', ') : '-'}
-                    </p>
-                  </div>
-                  <div>
-                    <h3 className="font-medium mb-2">{t('diagnostics.upstreamStates')}</h3>
-                    <div className="space-y-1">
-                      {Object.entries(diagnosticsDetail.upstreamStates).map(([nodeId, status]) => (
-                        <div key={nodeId} className="flex items-center justify-between gap-4 text-xs">
-                          <span className="font-mono">{nodeId}</span>
-                          <span className="text-muted">{status}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-                <div className="space-y-4 text-sm">
-                  <div>
-                    <h3 className="font-medium mb-2">{t('diagnostics.errorDetails')}</h3>
-                    {diagnosticsDetail.errorSummary.length > 0 ? (
-                      <div className="space-y-3">
-                        {diagnosticsDetail.errorSummary.map((item) => (
-                          <div key={item.nodeId} className="border border-line rounded-lg p-3">
-                            <div className="flex items-center gap-2 mb-2">
-                              <span className="font-mono text-xs">{item.nodeId}</span>
-                              <Badge variant="error">{item.errorType}</Badge>
-                            </div>
-                            <p className="text-xs text-muted whitespace-pre-wrap break-words mb-2">{item.errorMessage}</p>
-                            <h4 className="text-xs font-medium mb-1">{t('diagnostics.suggestedActions')}</h4>
-                            <div className="space-y-1">
-                              {item.suggestedActions.map((action) => (
-                                <p key={action} className="text-xs text-muted">- {action}</p>
-                              ))}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <p className="text-muted">{t('diagnostics.noDiagnosticsAvailable')}</p>
-                    )}
-                  </div>
-                </div>
-              </div>
+              <DiagnosticsDetail
+                diagnostics={diagnosticsDetail}
+                onAction={handleAction}
+                t={t}
+              />
             ) : (
               <p className="text-sm text-muted">{t('diagnostics.noDiagnosticsAvailable')}</p>
             )}
@@ -399,6 +382,170 @@ export default function DiagnosticsPage() {
           </Card>
         </div>
       </div>
+    </div>
+  );
+}
+
+// =============================================================================
+// Diagnostics Detail Component
+// =============================================================================
+
+interface DiagnosticsDetailProps {
+  diagnostics: DiagnosticsSummary;
+  onAction: (action: RecommendedAction) => void;
+  t: (key: string) => string;
+}
+
+function DiagnosticsDetail({ diagnostics, onAction, t }: DiagnosticsDetailProps) {
+  return (
+    <div className="space-y-6">
+      {/* Workflow Info */}
+      {diagnostics.workflowName && (
+        <div className="text-sm">
+          <span className="text-muted">{t('diagnostics.workflow')}: </span>
+          <span className="font-medium">{diagnostics.workflowName}</span>
+        </div>
+      )}
+
+      {/* Failure Propagation Summary */}
+      {diagnostics.failurePropagation && (
+        <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
+          <h3 className="font-medium text-red-800 dark:text-red-200 mb-2">
+            🔍 {t('diagnostics.failureAnalysis')}
+          </h3>
+          <p className="text-sm text-red-700 dark:text-red-300">
+            {diagnostics.failurePropagation.summary}
+          </p>
+          <div className="mt-2 text-xs text-red-600 dark:text-red-400">
+            <span>{t('diagnostics.rootCause')}: </span>
+            <span className="font-mono">{diagnostics.failurePropagation.rootCauseNodeId}</span>
+            <span className="mx-2">•</span>
+            <span>{t('diagnostics.affectedNodes')}: {diagnostics.failurePropagation.affectedNodeCount}</span>
+          </div>
+        </div>
+      )}
+
+      {/* Failed Nodes */}
+      {diagnostics.failedNodes.length > 0 && (
+        <div>
+          <h3 className="font-medium mb-3 flex items-center gap-2">
+            <span className="text-red-500">✕</span>
+            {t('diagnostics.failedNodes')} ({diagnostics.failedNodes.length})
+          </h3>
+          <div className="space-y-3">
+            {diagnostics.failedNodes.map((node) => (
+              <div
+                key={node.nodeId}
+                className="border border-red-200 dark:border-red-800 rounded-lg p-3"
+              >
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="font-mono text-sm">{node.nodeName || node.nodeId}</span>
+                  <Badge variant="error">{node.errorType}</Badge>
+                </div>
+                <p className="text-xs text-muted whitespace-pre-wrap break-words mb-2">
+                  {node.errorMessage}
+                </p>
+                {node.upstreamCompleted.length > 0 && (
+                  <div className="text-xs text-muted">
+                    <span className="text-green-600 dark:text-green-400">✓</span>
+                    <span className="ml-1">{t('diagnostics.upstreamCompleted')}: </span>
+                    <span className="font-mono">{node.upstreamCompleted.join(', ')}</span>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Downstream Impact */}
+      {diagnostics.downstreamImpact.length > 0 && (
+        <div>
+          <h3 className="font-medium mb-3 flex items-center gap-2">
+            <span className="text-yellow-500">⚠</span>
+            {t('diagnostics.downstreamImpact')} ({diagnostics.downstreamImpact.length})
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+            {diagnostics.downstreamImpact.map((node) => (
+              <div
+                key={node.nodeId}
+                className="border border-line rounded-lg p-3 text-sm"
+              >
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="font-mono text-xs">{node.nodeName || node.nodeId}</span>
+                  <Badge variant={getImpactTypeBadge(node.impactType)}>
+                    {node.impactType}
+                  </Badge>
+                </div>
+                <p className="text-xs text-muted">{node.reason}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Recommended Actions */}
+      {diagnostics.recommendedActions.length > 0 && (
+        <div>
+          <h3 className="font-medium mb-3 flex items-center gap-2">
+            <span>💡</span>
+            {t('diagnostics.recommendedActions')}
+          </h3>
+          <div className="space-y-2">
+            {diagnostics.recommendedActions.map((action, index) => (
+              <div
+                key={index}
+                className="border border-line rounded-lg p-3 flex items-start justify-between gap-4"
+              >
+                <div className="flex-1">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="font-medium text-sm">{action.title}</span>
+                    <Badge variant={getPriorityBadge(action.priority)}>
+                      {action.priority}
+                    </Badge>
+                  </div>
+                  <p className="text-xs text-muted">{action.description}</p>
+                </div>
+                {(action.type === 'rerun' || action.type === 'rerun_with_edits' || action.type === 'check_api') && (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => onAction(action)}
+                  >
+                    {action.type === 'check_api' ? t('diagnostics.goToSettings') : t('diagnostics.takeAction')}
+                  </Button>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* All Node States */}
+      <details className="border border-line rounded-lg">
+        <summary className="px-4 py-3 cursor-pointer text-sm font-medium">
+          {t('diagnostics.allNodeStates')} ({Object.keys(diagnostics.upstreamStates).length})
+        </summary>
+        <div className="px-4 pb-4">
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-xs">
+            {Object.entries(diagnostics.upstreamStates).map(([nodeId, status]) => (
+              <div key={nodeId} className="flex items-center justify-between gap-2 p-2 bg-surface rounded">
+                <span className="font-mono truncate">{nodeId}</span>
+                <Badge
+                  variant={
+                    status === 'completed' ? 'default' :
+                    status === 'failed' ? 'error' :
+                    status === 'running' ? 'warning' :
+                    'default'
+                  }
+                >
+                  {status}
+                </Badge>
+              </div>
+            ))}
+          </div>
+        </div>
+      </details>
     </div>
   );
 }

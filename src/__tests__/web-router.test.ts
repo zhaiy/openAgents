@@ -83,13 +83,21 @@ const mockContext = {
   runReuseService: mockRunReuseService,
 } as unknown as WebAppContext;
 
-function createMockRequest(method: string, url: string): http.IncomingMessage {
-  return {
+function createMockRequest(method: string, url: string, body?: unknown): http.IncomingMessage {
+  const req = {
     method,
     url,
     headers: {},
-    on: vi.fn(),
-  } as unknown as http.IncomingMessage;
+    on: vi.fn((event: string, callback: (chunk?: unknown) => void) => {
+      if (event === 'data' && body) {
+        callback(Buffer.from(JSON.stringify(body)));
+      }
+      if (event === 'end') {
+        callback();
+      }
+    }),
+  };
+  return req as unknown as http.IncomingMessage;
 }
 
 function createMockResponse(): { res: http.ServerResponse; data: unknown[] } {
@@ -101,6 +109,32 @@ function createMockResponse(): { res: http.ServerResponse; data: unknown[] } {
       end: (chunk?: unknown) => { if (chunk) data.push(chunk); },
     } as unknown as http.ServerResponse,
     data,
+  };
+}
+
+function createMockResponseWithBody(body: unknown): { res: http.ServerResponse; data: unknown[]; req: http.IncomingMessage } {
+  const data: unknown[] = [];
+  const req = {
+    method: 'POST',
+    url: '',
+    headers: { 'content-type': 'application/json' },
+    on: vi.fn((event: string, callback: (chunk?: unknown) => void) => {
+      if (event === 'data') {
+        callback(Buffer.from(JSON.stringify(body)));
+      }
+      if (event === 'end') {
+        callback();
+      }
+    }),
+  } as unknown as http.IncomingMessage;
+  return {
+    res: {
+      writeHead: () => { /* noop */ },
+      write: (chunk: unknown) => { data.push(chunk); },
+      end: (chunk?: unknown) => { if (chunk) data.push(chunk); },
+    } as unknown as http.ServerResponse,
+    data,
+    req,
   };
 }
 
@@ -277,13 +311,13 @@ describe('WebRouter', () => {
 
       const postReq = createMockRequest('POST', '/api/runs/run1/rerun-with-edits') as http.IncomingMessage;
       (postReq as unknown as Record<symbol, unknown>)[Symbol.asyncIterator] = async function* () {
-        yield Buffer.from(JSON.stringify({ inputData: { q: 1 } }));
+        yield Buffer.from(JSON.stringify({ inputData: { q: 1 }, runtimeOptions: { autoApprove: true } }));
       };
       await router.handle(postReq, createMockResponse().res);
 
       expect(mockRunReuseService.getReusableConfig).toHaveBeenCalledWith('run1');
       expect(mockRunReuseService.createRerunPayload).toHaveBeenCalledWith('run1');
-      expect(mockRunReuseService.createEditedRerunPayload).toHaveBeenCalledWith('run1', { q: 1 });
+      expect(mockRunReuseService.createEditedRerunPayload).toHaveBeenCalledWith('run1', { q: 1 }, { autoApprove: true });
       expect(mockRunService.startRun).toHaveBeenCalledTimes(2);
     });
   });
@@ -311,6 +345,297 @@ describe('WebRouter', () => {
       const { res } = createMockResponse();
       const handled = await router.handle(req, res);
       expect(handled).toBe(false);
+    });
+  });
+
+  // =============================================================================
+  // N1: DTO/API Contract Tests
+  // =============================================================================
+
+  describe('RunSummary DTO contract', () => {
+    it('returns RunSummary with all required fields', async () => {
+      const mockRunSummary = {
+        runId: 'run1',
+        workflowId: 'wf1',
+        workflowName: 'Test Workflow',
+        status: 'completed',
+        startedAt: Date.now(),
+        completedAt: Date.now() + 1000,
+        durationMs: 1000,
+        stepCount: 3,
+        completedStepCount: 3,
+      };
+      mockRunService.listRuns.mockReturnValue([mockRunSummary]);
+
+      const req = createMockRequest('GET', '/api/runs');
+      const { res, data } = createMockResponse();
+      await router.handle(req, res);
+
+      const response = JSON.parse(String(data[0]));
+      expect(response).toBeInstanceOf(Array);
+      expect(response[0]).toHaveProperty('runId');
+      expect(response[0]).toHaveProperty('workflowId');
+      expect(response[0]).toHaveProperty('workflowName');
+      expect(response[0]).toHaveProperty('status');
+      expect(response[0]).toHaveProperty('startedAt');
+      expect(response[0]).toHaveProperty('stepCount');
+      expect(response[0]).toHaveProperty('completedStepCount');
+      expect(typeof response[0].startedAt).toBe('number');
+    });
+  });
+
+  describe('RunDetail DTO contract', () => {
+    it('returns RunDetail with all required fields', async () => {
+      const mockRunDetail = {
+        runId: 'run1',
+        workflowId: 'wf1',
+        workflowName: 'Test Workflow',
+        status: 'completed',
+        input: 'test input',
+        inputData: { query: 'test' },
+        startedAt: Date.now(),
+        completedAt: Date.now() + 1000,
+        durationMs: 1000,
+        tokenUsage: { promptTokens: 100, completionTokens: 50, totalTokens: 150 },
+        steps: [
+          {
+            stepId: 'step1',
+            name: 'Step 1',
+            status: 'completed',
+            startedAt: Date.now(),
+            completedAt: Date.now() + 500,
+            durationMs: 500,
+          },
+        ],
+      };
+      mockRunService.getRun.mockReturnValue(mockRunDetail);
+
+      const req = createMockRequest('GET', '/api/runs/run1');
+      const { res, data } = createMockResponse();
+      await router.handle(req, res);
+
+      const response = JSON.parse(String(data[0]));
+      expect(response).toHaveProperty('runId');
+      expect(response).toHaveProperty('workflowId');
+      expect(response).toHaveProperty('workflowName');
+      expect(response).toHaveProperty('status');
+      expect(response).toHaveProperty('startedAt');
+      expect(response).toHaveProperty('steps');
+      expect(typeof response.startedAt).toBe('number');
+      expect(response.steps).toBeInstanceOf(Array);
+      expect(response.steps[0]).toHaveProperty('stepId');
+      expect(response.steps[0]).toHaveProperty('name');
+      expect(response.steps[0]).toHaveProperty('status');
+    });
+  });
+
+  describe('Error response structure', () => {
+    it('returns unified error structure for NOT_FOUND', async () => {
+      mockWorkflowVisualService.getVisualSummary.mockReturnValue(null);
+
+      const req = createMockRequest('GET', '/api/workflows/nonexistent/visual-summary');
+      const { res, data } = createMockResponse();
+      await router.handle(req, res);
+
+      const response = JSON.parse(String(data[0]));
+      expect(response).toHaveProperty('error');
+      expect(response.error).toHaveProperty('code');
+      expect(response.error).toHaveProperty('message');
+      expect(response.error.code).toBe('NOT_FOUND');
+    });
+
+    it('returns unified error structure for BAD_REQUEST', async () => {
+      // Clear all mocks to ensure clean state
+      vi.clearAllMocks();
+
+      // Request compare without required query parameters
+      const req = createMockRequest('GET', '/api/runs/compare?runA='); // Missing runB
+      const { res, data } = createMockResponse();
+      await router.handle(req, res);
+
+      const response = JSON.parse(String(data[0]));
+      expect(response).toHaveProperty('error');
+      expect(response.error).toHaveProperty('code');
+      expect(response.error).toHaveProperty('message');
+      expect(response.error.code).toBe('BAD_REQUEST');
+    });
+
+    it('returns unified error structure for comparison session not found', async () => {
+      mockRunCompareService.getSession.mockReturnValue(null);
+
+      const req = createMockRequest('GET', '/api/compare/nonexistent');
+      const { res, data } = createMockResponse();
+      await router.handle(req, res);
+
+      const response = JSON.parse(String(data[0]));
+      expect(response).toHaveProperty('error');
+      expect(response.error).toHaveProperty('code');
+      expect(response.error).toHaveProperty('message');
+      expect(response.error.code).toBe('NOT_FOUND');
+    });
+  });
+
+  // =============================================================================
+  // N3: Main Flow Closure Tests
+  // =============================================================================
+
+  describe('Rerun error handling (S7/S11)', () => {
+    it('returns NOT_FOUND when rerun is called on non-existent run', async () => {
+      mockRunReuseService.createRerunPayload.mockReturnValue(null);
+
+      const req = createMockRequest('POST', '/api/runs/nonexistent/rerun');
+      const { res, data } = createMockResponse();
+      await router.handle(req, res);
+
+      const response = JSON.parse(String(data[0]));
+      expect(response).toHaveProperty('error');
+      expect(response.error.code).toBe('NOT_FOUND');
+      expect(response.error.message).toBe('Run not found');
+    });
+
+    it('returns NOT_FOUND when rerun-with-edits is called on non-existent run', async () => {
+      mockRunReuseService.createEditedRerunPayload.mockReturnValue(null);
+
+      const req = createMockRequest('POST', '/api/runs/nonexistent/rerun-with-edits') as http.IncomingMessage & { on: ReturnType<typeof vi.fn> };
+      (req as unknown as Record<string, unknown>)[Symbol.asyncIterator as unknown as string] = async function* () {
+        yield Buffer.from(JSON.stringify({ inputData: {} }));
+      };
+      const { res, data } = createMockResponse();
+      await router.handle(req, res);
+
+      const response = JSON.parse(String(data[0]));
+      expect(response).toHaveProperty('error');
+      expect(response.error.code).toBe('NOT_FOUND');
+    });
+
+    it('starts new run when rerun is called on existing run', async () => {
+      mockRunReuseService.createRerunPayload.mockReturnValue({
+        workflowId: 'wf1',
+        input: 'test',
+        inputData: { query: 'test' },
+        stream: true,
+      });
+      mockRunService.startRun.mockReturnValue({ runId: 'run2', status: 'running' });
+
+      const req = createMockRequest('POST', '/api/runs/run1/rerun');
+      const { res, data } = createMockResponse();
+      await router.handle(req, res);
+
+      const response = JSON.parse(String(data[0]));
+      expect(response).toHaveProperty('runId');
+      expect(response).toHaveProperty('status');
+      expect(response.runId).toBe('run2');
+    });
+  });
+
+  describe('Reusable config error handling (S11)', () => {
+    it('returns NOT_FOUND when getting reusable config for non-existent run', async () => {
+      mockRunReuseService.getReusableConfig.mockReturnValue(null);
+
+      const req = createMockRequest('GET', '/api/runs/nonexistent/reusable-config');
+      const { res, data } = createMockResponse();
+      await router.handle(req, res);
+
+      const response = JSON.parse(String(data[0]));
+      expect(response).toHaveProperty('error');
+      expect(response.error.code).toBe('NOT_FOUND');
+    });
+  });
+
+  describe('Draft error handling (S13)', () => {
+    it('returns NOT_FOUND when getting non-existent draft', async () => {
+      mockConfigDraftService.getDraft.mockReturnValue(null);
+
+      const req = createMockRequest('GET', '/api/workflows/wf1/drafts/nonexistent');
+      const { res, data } = createMockResponse();
+      await router.handle(req, res);
+
+      const response = JSON.parse(String(data[0]));
+      expect(response).toHaveProperty('error');
+      expect(response.error.code).toBe('NOT_FOUND');
+    });
+
+    it('returns NOT_FOUND when updating non-existent draft', async () => {
+      mockConfigDraftService.updateDraft.mockReturnValue(null);
+
+      const req = createMockRequest('PATCH', '/api/workflows/wf1/drafts/nonexistent') as http.IncomingMessage & { on: ReturnType<typeof vi.fn> };
+      (req as unknown as Record<string, unknown>)[Symbol.asyncIterator as unknown as string] = async function* () {
+        yield Buffer.from(JSON.stringify({ name: 'Updated' }));
+      };
+      const { res, data } = createMockResponse();
+      await router.handle(req, res);
+
+      const response = JSON.parse(String(data[0]));
+      expect(response).toHaveProperty('error');
+      expect(response.error.code).toBe('NOT_FOUND');
+    });
+
+    it('returns NOT_FOUND when deleting non-existent draft', async () => {
+      mockConfigDraftService.deleteDraft.mockReturnValue(false);
+
+      const req = createMockRequest('DELETE', '/api/workflows/wf1/drafts/nonexistent');
+      const { res, data } = createMockResponse();
+      await router.handle(req, res);
+
+      const response = JSON.parse(String(data[0]));
+      expect(response).toHaveProperty('error');
+      expect(response.error.code).toBe('NOT_FOUND');
+    });
+  });
+
+  describe('Run visual state error handling (S11)', () => {
+    it('returns NOT_FOUND when getting visual state for non-existent run', async () => {
+      mockRunVisualService.getVisualState.mockImplementation(() => {
+        throw new Error('Run not found');
+      });
+
+      const req = createMockRequest('GET', '/api/runs/nonexistent/visual-state');
+      const { res, data } = createMockResponse();
+      await router.handle(req, res);
+
+      const response = JSON.parse(String(data[0]));
+      expect(response).toHaveProperty('error');
+      expect(response.error.code).toBe('NOT_FOUND');
+    });
+
+    it('returns NOT_FOUND when getting timeline for non-existent run', async () => {
+      mockRunVisualService.getTimeline.mockImplementation(() => {
+        throw new Error('Run not found');
+      });
+
+      const req = createMockRequest('GET', '/api/runs/nonexistent/timeline');
+      const { res, data } = createMockResponse();
+      await router.handle(req, res);
+
+      const response = JSON.parse(String(data[0]));
+      expect(response).toHaveProperty('error');
+      expect(response.error.code).toBe('NOT_FOUND');
+    });
+  });
+
+  describe('Compare session error handling (S14)', () => {
+    it('returns NOT_FOUND when getting non-existent compare session', async () => {
+      mockRunCompareService.getSession.mockReturnValue(null);
+
+      const req = createMockRequest('GET', '/api/compare/sessions/nonexistent');
+      const { res, data } = createMockResponse();
+      await router.handle(req, res);
+
+      const response = JSON.parse(String(data[0]));
+      expect(response).toHaveProperty('error');
+      expect(response.error.code).toBe('NOT_FOUND');
+    });
+
+    it('returns NOT_FOUND when deleting non-existent compare session', async () => {
+      mockRunCompareService.deleteSession.mockReturnValue(false);
+
+      const req = createMockRequest('DELETE', '/api/compare/sessions/nonexistent');
+      const { res, data } = createMockResponse();
+      await router.handle(req, res);
+
+      const response = JSON.parse(String(data[0]));
+      expect(response).toHaveProperty('error');
+      expect(response.error.code).toBe('NOT_FOUND');
     });
   });
 });

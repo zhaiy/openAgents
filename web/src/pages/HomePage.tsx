@@ -24,8 +24,8 @@ export default function HomePage() {
   const needsAttention = (failedRuns?.length || 0) + (waitingGates?.length || 0);
   const isLoading = runsLoading || failedLoading || gatesLoading;
 
-  const formatDate = (dateStr: string) => {
-    return new Date(dateStr).toLocaleString();
+  const formatDate = (timestamp: number) => {
+    return new Date(timestamp).toLocaleString();
   };
 
   const getStatusBadgeClass = (status: string) => {
@@ -204,7 +204,7 @@ export default function HomePage() {
                       </td>
                       <td className="px-4 py-3 text-sm font-medium">{run.workflowName}</td>
                       <td className="px-4 py-3 text-sm text-muted hidden sm:table-cell">
-                        {formatDate(run.createdAt)}
+                        {formatDate(run.startedAt)}
                       </td>
                       <td className="px-4 py-3 text-sm text-muted hidden sm:table-cell">
                         {run.durationMs ? `${(run.durationMs / 1000).toFixed(1)}s` : '-'}

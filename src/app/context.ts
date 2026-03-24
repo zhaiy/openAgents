@@ -65,10 +65,10 @@ export function buildWebContext(projectRoot: string = process.cwd()): WebAppCont
 
   // Visual services
   const workflowVisualService = new WorkflowVisualService(loader);
-  const runVisualService = new RunVisualService(stateManager);
+  const runVisualService = new RunVisualService(stateManager, runEventEmitter);
   const configDraftService = new ConfigDraftService(projectRoot);
   const runCompareService = new RunCompareService(stateManager);
-  const diagnosticsService = new DiagnosticsService(stateManager);
+  const diagnosticsService = new DiagnosticsService(stateManager, loader);
   const runReuseService = new RunReuseService(stateManager, loader);
 
   return {

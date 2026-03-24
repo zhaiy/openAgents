@@ -1,11 +1,11 @@
 /**
- * RunsPage - T26 (Runs List Upgrade)
+ * RunsPage - T26/N3
  *
  * Upgraded with:
  * - Status filter
  * - Workflow filter
  * - Time filter
- * - Quick rerun
+ * - Quick rerun with error handling (N3)
  * - Quick compare entry
  * - Failed/gate badges
  */
@@ -13,7 +13,7 @@ import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from '../i18n';
 import { useApi } from '../hooks/useApi';
-import { runApi, workflowApi } from '../api';
+import { runApi, workflowApi, ApiError } from '../api';
 
 type StatusFilter = 'all' | 'running' | 'completed' | 'failed' | 'interrupted';
 type TimeFilter = 'all' | 'today' | 'week' | 'month';
@@ -31,6 +31,7 @@ export default function RunsPage() {
   const [timeFilter, setTimeFilter] = useState<TimeFilter>('all');
   const [compareRunA, setCompareRunA] = useState<string>('');
   const [compareRunB, setCompareRunB] = useState<string>('');
+  const [rerunError, setRerunError] = useState<{ runId: string; message: string } | null>(null);
 
   // Filter runs
   const filteredRuns = useMemo(() => {
@@ -45,7 +46,7 @@ export default function RunsPage() {
 
       // Time filter
       if (timeFilter !== 'all') {
-        const runDate = new Date(run.createdAt);
+        const runDate = new Date(run.startedAt);
         const now = new Date();
         if (timeFilter === 'today') {
           const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -72,8 +73,8 @@ export default function RunsPage() {
     return `${minutes}m ${seconds % 60}s`;
   };
 
-  const formatDate = (dateStr: string) => {
-    return new Date(dateStr).toLocaleString();
+  const formatDate = (timestamp: number) => {
+    return new Date(timestamp).toLocaleString();
   };
 
   const getStatusBadgeClass = (status: string) => {
@@ -92,12 +93,22 @@ export default function RunsPage() {
   };
 
   const handleQuickRerun = async (runId: string) => {
+    setRerunError(null);
     try {
       const nextRun = await runApi.rerun(runId);
       refetch();
       navigate(`/runs/${nextRun.runId}/execute`);
     } catch (err) {
-      console.error('Failed to rerun:', err);
+      // Enhanced error handling (N3/S7)
+      if (err instanceof ApiError) {
+        if (err.code === 'NOT_FOUND') {
+          setRerunError({ runId, message: t('errors.runNotFound') || 'Run not found' });
+        } else {
+          setRerunError({ runId, message: err.message || t('errors.rerunFailed') || 'Rerun failed' });
+        }
+      } else {
+        setRerunError({ runId, message: t('errors.rerunFailed') || 'Rerun failed' });
+      }
     }
   };
 
@@ -106,6 +117,9 @@ export default function RunsPage() {
       navigate(`/runs/compare?runA=${compareRunA}&runB=${compareRunB}`);
     }
   };
+
+  // Clear rerun error
+  const clearRerunError = () => setRerunError(null);
 
   // Get unique workflows for filter
   const uniqueWorkflows = useMemo(() => {
@@ -145,6 +159,26 @@ export default function RunsPage() {
           </button>
         </div>
       </div>
+
+      {/* Rerun Error (N3) */}
+      {rerunError && (
+        <div className="mb-6 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg flex items-center justify-between">
+          <div>
+            <p className="text-sm font-medium text-red-800 dark:text-red-200">
+              {t('errors.rerunFailed') || 'Rerun Failed'}
+            </p>
+            <p className="text-xs text-red-600 dark:text-red-400 mt-1">
+              {rerunError.message} (Run: {rerunError.runId})
+            </p>
+          </div>
+          <button
+            onClick={clearRerunError}
+            className="text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-200"
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       {/* Filters */}
       <div className="flex flex-wrap gap-3 mb-6">
@@ -239,7 +273,7 @@ export default function RunsPage() {
                       </button>
                     </td>
                     <td className="px-4 py-4 text-sm text-muted hidden md:table-cell">
-                      {formatDate(run.createdAt)}
+                      {formatDate(run.startedAt)}
                     </td>
                     <td className="px-4 py-4 text-sm text-muted hidden md:table-cell">
                       {formatDuration(run.durationMs)}
@@ -293,7 +327,7 @@ export default function RunsPage() {
                     </span>
                     <span className="text-sm font-medium">{run.workflowName}</span>
                   </div>
-                  <span className="text-xs text-muted">{formatDate(run.createdAt)}</span>
+                  <span className="text-xs text-muted">{formatDate(run.startedAt)}</span>
                 </div>
                 <div className="flex items-center justify-between">
                   <div className="text-xs text-muted space-x-3">

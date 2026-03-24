@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { RunVisualService } from '../app/services/run-visual-service.js';
+import { RunEventEmitter } from '../app/events/run-event-emitter.js';
 import type { RunState } from '../types/index.js';
 
 describe('RunVisualService', () => {
@@ -7,6 +8,7 @@ describe('RunVisualService', () => {
   let mockStateManager: {
     findRunById: ReturnType<typeof vi.fn>;
   };
+  let mockEventEmitter: RunEventEmitter;
 
   const createMockRunState = (overrides: Partial<RunState> = {}): RunState => ({
     runId: 'run-123',
@@ -24,7 +26,8 @@ describe('RunVisualService', () => {
     mockStateManager = {
       findRunById: vi.fn(),
     };
-    service = new RunVisualService(mockStateManager as never);
+    mockEventEmitter = new RunEventEmitter();
+    service = new RunVisualService(mockStateManager as never, mockEventEmitter);
   });
 
   describe('getVisualState', () => {
@@ -168,22 +171,53 @@ describe('RunVisualService', () => {
       expect(result.nodeStates['unknown-step'].status).toBe('pending');
     });
 
-    it('should set version to 1', () => {
+    it('should set version based on current sequence from event emitter', () => {
       const mockRun = createMockRunState();
       mockStateManager.findRunById.mockReturnValue(mockRun);
 
+      // Emit some events to increment sequence
+      mockEventEmitter.emit({ type: 'step.started', stepId: 'step-1', runId: 'run-123', ts: 1000 });
+      mockEventEmitter.emit({ type: 'step.completed', stepId: 'step-1', runId: 'run-123', ts: 2000 });
+
       const result = service.getVisualState('run-123');
 
-      expect(result.version).toBe(1);
+      // Version should be sequence + 1
+      expect(result.version).toBe(3);
     });
 
-    it('should set lastEventId with runId and startedAt', () => {
-      const mockRun = createMockRunState({ startedAt: 9999 });
+    it('should set lastEventId with correct sequence from event emitter', () => {
+      const mockRun = createMockRunState({ runId: 'run-xyz' });
       mockStateManager.findRunById.mockReturnValue(mockRun);
 
-      const result = service.getVisualState('run-123');
+      // Emit some events
+      mockEventEmitter.emit({ type: 'step.started', stepId: 'step-1', runId: 'run-xyz', ts: 1000 });
+      mockEventEmitter.emit({ type: 'step.completed', stepId: 'step-1', runId: 'run-xyz', ts: 2000 });
 
-      expect(result.lastEventId).toBe('run:run-123:9999');
+      const result = service.getVisualState('run-xyz');
+
+      // lastEventId should be runId:sequence
+      expect(result.lastEventId).toBe('run-xyz:2');
+    });
+
+    it('should return version 1 and lastEventId with sequence 0 when no events emitted', () => {
+      const mockRun = createMockRunState({ runId: 'run-new' });
+      mockStateManager.findRunById.mockReturnValue(mockRun);
+
+      const result = service.getVisualState('run-new');
+
+      expect(result.version).toBe(1);
+      expect(result.lastEventId).toBe('run-new:0');
+    });
+
+    it('should work without event emitter (fallback to sequence 0)', () => {
+      const serviceWithoutEmitter = new RunVisualService(mockStateManager as never, undefined);
+      const mockRun = createMockRunState();
+      mockStateManager.findRunById.mockReturnValue(mockRun);
+
+      const result = serviceWithoutEmitter.getVisualState('run-123');
+
+      expect(result.version).toBe(1);
+      expect(result.lastEventId).toBe('run-123:0');
     });
   });
 
@@ -325,6 +359,53 @@ describe('RunVisualService', () => {
       for (let i = 1; i < timestamps.length; i++) {
         expect(timestamps[i]).toBeGreaterThanOrEqual(timestamps[i - 1]);
       }
+    });
+  });
+
+  // =============================================================================
+  // N2: SSE State Consistency Tests
+  // =============================================================================
+
+  describe('SSE state consistency (S9/S10 scenarios)', () => {
+    it('should return consistent lastEventId after multiple events', () => {
+      const mockRun = createMockRunState({ runId: 'run-consistency' });
+      mockStateManager.findRunById.mockReturnValue(mockRun);
+
+      // Simulate event sequence
+      mockEventEmitter.emit({ type: 'workflow.started', runId: 'run-consistency', ts: 1000, resumed: false, input: 'test', workflowId: 'wf-1' });
+      mockEventEmitter.emit({ type: 'step.started', stepId: 'step-1', runId: 'run-consistency', ts: 1100 });
+      mockEventEmitter.emit({ type: 'step.completed', stepId: 'step-1', runId: 'run-consistency', ts: 2000, duration: 900, outputPreview: 'result' });
+      mockEventEmitter.emit({ type: 'workflow.completed', runId: 'run-consistency', ts: 2100 });
+
+      const result = service.getVisualState('run-consistency');
+
+      expect(result.lastEventId).toBe('run-consistency:4');
+      expect(result.version).toBe(5);
+    });
+
+    it('should handle snapshot request after events (refresh recovery)', () => {
+      const mockRun = createMockRunState({
+        runId: 'run-refresh',
+        steps: {
+          'step-1': { status: 'completed', startedAt: 1000, completedAt: 2000 },
+          'step-2': { status: 'running', startedAt: 2000 },
+        },
+      });
+      mockStateManager.findRunById.mockReturnValue(mockRun);
+
+      // Simulate some events happened
+      mockEventEmitter.emit({ type: 'step.started', stepId: 'step-1', runId: 'run-refresh', ts: 1000 });
+      mockEventEmitter.emit({ type: 'step.completed', stepId: 'step-1', runId: 'run-refresh', ts: 2000 });
+      mockEventEmitter.emit({ type: 'step.started', stepId: 'step-2', runId: 'run-refresh', ts: 2000 });
+
+      // Get visual state (simulating page refresh)
+      const result = service.getVisualState('run-refresh');
+
+      // Visual state should reflect current run state
+      expect(result.nodeStates['step-1'].status).toBe('completed');
+      expect(result.nodeStates['step-2'].status).toBe('running');
+      // lastEventId should match the event emitter's sequence
+      expect(result.lastEventId).toBe('run-refresh:3');
     });
   });
 });

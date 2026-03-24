@@ -1,11 +1,35 @@
 const API_BASE = '/api';
 
+// =============================================================================
+// Unified API Error Types - Aligned with backend DTO
+// =============================================================================
+
+export type ApiErrorCode =
+  | 'NOT_FOUND'
+  | 'VALIDATION_ERROR'
+  | 'INTERNAL_ERROR'
+  | 'BAD_REQUEST'
+  | 'UNAUTHORIZED'
+  | 'FORBIDDEN'
+  | 'CONFLICT';
+
+export interface ApiErrorDetail {
+  code: ApiErrorCode;
+  message: string;
+  details?: unknown;
+}
+
+export interface ApiErrorResponse {
+  error: ApiErrorDetail;
+}
+
 // API Error class for structured error handling
 export class ApiError extends Error {
   constructor(
     message: string,
     public status: number,
-    public code?: string
+    public code?: ApiErrorCode,
+    public details?: unknown
   ) {
     super(message);
     this.name = 'ApiError';
@@ -42,17 +66,21 @@ async function request<T>(path: string, options?: RequestOptions): Promise<T> {
 
   if (!res.ok) {
     let errorMessage = `HTTP ${res.status}`;
-    let errorCode: string | undefined;
+    let errorCode: ApiErrorCode | undefined;
+    let errorDetails: unknown;
 
     try {
-      const errorBody = await res.json();
-      errorMessage = errorBody.error?.message || errorBody.message || errorMessage;
-      errorCode = errorBody.error?.code;
+      const errorBody = await res.json() as ApiErrorResponse;
+      if (errorBody.error) {
+        errorMessage = errorBody.error.message;
+        errorCode = errorBody.error.code;
+        errorDetails = errorBody.error.details;
+      }
     } catch {
       // Use default message
     }
 
-    throw new ApiError(errorMessage, res.status, errorCode);
+    throw new ApiError(errorMessage, res.status, errorCode, errorDetails);
   }
 
   // Handle empty responses
@@ -76,8 +104,11 @@ export interface RunSummary {
   workflowId: string;
   workflowName: string;
   status: 'running' | 'completed' | 'failed' | 'interrupted';
-  createdAt: string;
+  startedAt: number;
+  completedAt?: number;
   durationMs?: number;
+  stepCount: number;
+  completedStepCount: number;
   score?: number;
 }
 
@@ -86,15 +117,12 @@ export interface RunDetail {
   workflowId: string;
   workflowName: string;
   status: 'running' | 'completed' | 'failed' | 'interrupted';
-  createdAt: string;
-  startedAt?: string;
-  completedAt?: string;
+  input: string;
+  inputData?: Record<string, unknown>;
+  startedAt: number;
+  completedAt?: number;
   durationMs?: number;
-  tokenUsage?: {
-    promptTokens: number;
-    completionTokens: number;
-    totalTokens: number;
-  };
+  tokenUsage?: TokenUsage;
   steps: Step[];
 }
 
@@ -102,11 +130,12 @@ export interface Step {
   stepId: string;
   name: string;
   status: 'pending' | 'running' | 'completed' | 'failed' | 'skipped' | 'gate_waiting';
-  startedAt?: string;
-  completedAt?: string;
+  startedAt?: number;
+  completedAt?: number;
   durationMs?: number;
   output?: string;
   error?: string;
+  tokenUsage?: TokenUsage;
 }
 
 export interface RunEvent {
@@ -271,20 +300,98 @@ export interface ConfigDraft {
   updatedAt: number;
 }
 
+// =============================================================================
+// Comparison Types (N7 Enhancement)
+// =============================================================================
+
+export type InputDiffType = 'added' | 'removed' | 'changed' | 'type_changed';
+
+export interface InputDiff {
+  field: string;
+  valueA: unknown;
+  valueB: unknown;
+  diffType: InputDiffType;
+  typeA?: string;
+  typeB?: string;
+}
+
+export interface NodeStatusDiff {
+  nodeId: string;
+  statusA: NodeStatus;
+  statusB: NodeStatus;
+  durationDiff?: {
+    runA?: number;
+    runB?: number;
+    delta?: number;
+  };
+  errorA?: string;
+  errorB?: string;
+  isCritical?: boolean;
+}
+
+export interface DurationDiff {
+  runA: number;
+  runB: number;
+  delta: number;
+  percentChange?: number;
+}
+
+export interface OutputDiffItem {
+  nodeId: string;
+  hasOutputA: boolean;
+  hasOutputB: boolean;
+  previewA?: string;
+  previewB?: string;
+  isIdentical: boolean;
+}
+
+export interface ComparisonSummary {
+  similarityScore: number;
+  keyDifferences: string[];
+  recommendations: string[];
+  warnings: string[];
+}
+
 export interface RunComparison {
   runAId: string;
   runBId: string;
-  inputDiff?: { field: string; valueA: unknown; valueB: unknown }[];
+  workflowInfo?: {
+    workflowId: string;
+    name: string;
+    isSameWorkflow: boolean;
+  };
+  inputDiff?: InputDiff[];
+  inputDiffSummary?: {
+    added: number;
+    removed: number;
+    changed: number;
+    unchanged: number;
+  };
   statusDiff: { runA: string; runB: string };
-  nodeStatusDiff?: { nodeId: string; statusA: NodeStatus; statusB: NodeStatus }[];
-  durationDiff?: { runA: number; runB: number };
-  tokenUsageDiff?: { runA: TokenUsage; runB: TokenUsage };
-  outputDiffSummary?: string;
+  nodeStatusDiff?: NodeStatusDiff[];
+  nodeDiffSummary?: {
+    totalNodes: number;
+    identical: number;
+    different: number;
+    onlyInA: number;
+    onlyInB: number;
+  };
+  durationDiff?: DurationDiff;
+  tokenUsageDiff?: {
+    runA: TokenUsage;
+    runB: TokenUsage;
+    delta?: number;
+    percentChange?: number;
+  };
+  outputDiff?: OutputDiffItem[];
+  summary: ComparisonSummary;
 }
 
 export interface RunComparisonSession {
   sessionId: string;
   createdAt: number;
+  ttl: number;
+  expiresAt: number;
   comparison: RunComparison;
 }
 
@@ -317,17 +424,69 @@ export const runApi = {
     }),
   rerun: (runId: string) =>
     request<RunStartResponse>(`/runs/${encodeURIComponent(runId)}/rerun`, { method: 'POST' }),
-  rerunWithEdits: (runId: string, inputData: Record<string, unknown>) =>
+  rerunWithEdits: (runId: string, inputData: Record<string, unknown>, runtimeOptions?: RuntimeOptions) =>
     request<RunStartResponse>(`/runs/${encodeURIComponent(runId)}/rerun-with-edits`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ inputData }),
+      body: JSON.stringify({ inputData, runtimeOptions }),
     }),
   getReusableConfig: (runId: string) =>
-    request<{ workflowId: string; input: string; inputData: Record<string, unknown>; runtimeOptions: unknown }>(
-      `/runs/${encodeURIComponent(runId)}/reusable-config`
-    ),
+    request<ReusableConfig>(`/runs/${encodeURIComponent(runId)}/reusable-config`),
+  getRerunPreview: (runId: string, edits?: { inputData?: Record<string, unknown>; runtimeOptions?: RuntimeOptions }) =>
+    request<RerunPreview>(`/runs/${encodeURIComponent(runId)}/rerun-preview`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(edits || {}),
+    }),
 };
+
+// Rerun types - aligned with backend DTO
+export interface RuntimeOptions {
+  stream?: boolean;
+  autoApprove?: boolean;
+  noEval?: boolean;
+}
+
+export interface ReusableConfig {
+  runId: string;
+  workflowId: string;
+  workflowName?: string;
+  input: string;
+  inputData: Record<string, unknown>;
+  runtimeOptions: RuntimeOptions;
+  runStatus: 'completed' | 'failed' | 'interrupted';
+  startedAt: number;
+  durationMs?: number;
+}
+
+export interface InputDiffItem {
+  field: string;
+  original?: unknown;
+  new?: unknown;
+  type: 'added' | 'removed' | 'changed';
+}
+
+export interface RerunPreview {
+  sourceRun: {
+    runId: string;
+    status: 'completed' | 'failed' | 'interrupted';
+    startedAt: number;
+    durationMs?: number;
+  };
+  workflow: {
+    workflowId: string;
+    name: string;
+    stepCount: number;
+    hasGate: boolean;
+  };
+  inputDiff?: InputDiffItem[];
+  runtimeOptionsDiff?: Array<{
+    field: 'stream' | 'autoApprove' | 'noEval';
+    original: boolean;
+    new: boolean;
+  }>;
+  warnings?: string[];
+}
 
 export const settingsApi = {
   get: () => request<Settings>('/settings'),
@@ -380,6 +539,58 @@ export const draftApi = {
     }),
 };
 
+// Diagnostics types - aligned with backend DTO
+export interface FailedNodeDetail {
+  nodeId: string;
+  nodeName?: string;
+  status: 'failed';
+  errorType: string;
+  errorMessage: string;
+  failedAt?: number;
+  retryCount?: number;
+  upstreamCompleted: string[];
+  upstreamFailed: string[];
+}
+
+export interface DownstreamImpactNode {
+  nodeId: string;
+  nodeName?: string;
+  status: NodeStatus;
+  impactType: 'blocked' | 'skipped' | 'will_fail';
+  reason: string;
+}
+
+export interface FailurePropagation {
+  rootCauseNodeId: string;
+  propagationPath: string[];
+  affectedNodeCount: number;
+  summary: string;
+}
+
+export interface RecommendedAction {
+  type: 'rerun' | 'rerun_with_edits' | 'fix_config' | 'check_api' | 'retry' | 'contact_support';
+  priority: 'high' | 'medium' | 'low';
+  title: string;
+  description: string;
+  targetNodeId?: string;
+  targetRunId?: string;
+}
+
+export interface DiagnosticsSummary {
+  runId: string;
+  workflowId: string;
+  workflowName?: string;
+  runStatus: 'running' | 'completed' | 'failed' | 'interrupted';
+  failedNodeIds: string[];
+  gateWaitingNodeIds: string[];
+  failedNodes: FailedNodeDetail[];
+  downstreamImpact: DownstreamImpactNode[];
+  failurePropagation?: FailurePropagation;
+  errorSummary: Array<{ nodeId: string; errorType: string; errorMessage: string; suggestedActions: string[] }>;
+  upstreamStates: Record<string, NodeStatus>;
+  recommendedActions: RecommendedAction[];
+}
+
 // Diagnostics API methods
 export const diagnosticsApi = {
   getFailedRuns: () =>
@@ -391,14 +602,7 @@ export const diagnosticsApi = {
       '/diagnostics/waiting-gates'
     ),
   getRunDiagnostics: (runId: string) =>
-    request<{
-      runId: string;
-      failedNodeIds: string[];
-      gateWaitingNodeIds: string[];
-      errorSummary: Array<{ nodeId: string; errorType: string; errorMessage: string; suggestedActions: string[] }>;
-      upstreamStates: Record<string, string>;
-      downstreamImpact: Record<string, string[]>;
-    }>(`/diagnostics/runs/${encodeURIComponent(runId)}`),
+    request<DiagnosticsSummary>(`/diagnostics/runs/${encodeURIComponent(runId)}`),
 };
 
 // Comparison API

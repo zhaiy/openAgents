@@ -1,5 +1,5 @@
 /**
- * WorkflowRunPage - T17/T23
+ * WorkflowRunPage - T17/T23/N3/N6
  *
  * Workflow run configuration page with support for:
  * - Normal workflow execution (text/JSON input)
@@ -9,13 +9,18 @@
  * - Draft save/load (T17 draft CRUD)
  * - Pre-run summary (T17 pre-run confirmation)
  * - Field validation (T17 input validation)
+ * - Unified error handling (N3)
+ * - Rerun diff preview (N6)
  */
 import { useState, useEffect, useCallback, type FormEvent } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useTranslation } from '../i18n';
 import { useApi } from '../hooks/useApi';
-import { workflowApi, runApi, draftApi, visualApi } from '../api';
+import { useApiError } from '../hooks/useApiError';
+import { workflowApi, runApi, draftApi, visualApi, ApiError } from '../api';
 import type { ConfigDraft, InputSchemaField } from '../api';
+import { NotFoundState } from '../components/ui/NotFoundState';
+import { ErrorState } from '../components/ui/ErrorState';
 
 type InputMode = 'text' | 'json' | 'fromPrevious' | 'draft';
 const DEFAULT_RUNTIME_OPTIONS_KEY = 'openagents.defaultRuntimeOptions';
@@ -25,6 +30,9 @@ export default function WorkflowRunPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const { t } = useTranslation();
+
+  // Unified error handling (N3)
+  const { error, isError, setError, clearError } = useApiError();
 
   // Check if this is a rerun (from previous run config)
   const sourceRunId = location.state?.sourceRunId as string | undefined;
@@ -38,6 +46,7 @@ export default function WorkflowRunPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [jsonError, setJsonError] = useState<string | null>(null);
   const [isRerun, setIsRerun] = useState(false);
+  const [sourceRunNotFound, setSourceRunNotFound] = useState(false);
 
   // Draft state (T17)
   const [showPreRunSummary, setShowPreRunSummary] = useState(false);
@@ -115,7 +124,11 @@ export default function WorkflowRunPage() {
       try {
         const config = await runApi.getReusableConfig(sourceRunId);
         return config;
-      } catch {
+      } catch (err) {
+        // Handle run not found (S11)
+        if (err instanceof ApiError && err.code === 'NOT_FOUND') {
+          setSourceRunNotFound(true);
+        }
         return null;
       }
     },
@@ -153,6 +166,7 @@ export default function WorkflowRunPage() {
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
+    clearError();
     // For JSON mode, show pre-run summary instead of direct submit (T17)
     if (inputMode === 'json' && !jsonError) {
       handleOpenPreRunSummary();
@@ -180,7 +194,8 @@ export default function WorkflowRunPage() {
       });
       navigate(`/runs/${result.runId}/execute`);
     } catch (err) {
-      console.error('Failed to start run:', err);
+      // Unified error handling (N3)
+      setError(err);
     } finally {
       setIsSubmitting(false);
     }
@@ -189,12 +204,14 @@ export default function WorkflowRunPage() {
   // Handle quick rerun (same config)
   const handleQuickRerun = async () => {
     if (!sourceRunId) return;
+    clearError();
     setIsSubmitting(true);
     try {
       const result = await runApi.rerun(sourceRunId);
       navigate(`/runs/${result.runId}/execute`);
     } catch (err) {
-      console.error('Failed to rerun:', err);
+      // Unified error handling (N3)
+      setError(err);
     } finally {
       setIsSubmitting(false);
     }
@@ -284,6 +301,7 @@ export default function WorkflowRunPage() {
   const handleSubmitInternal = async () => {
     if (!workflowId || (inputMode === 'json' && jsonError)) return;
     setIsSubmitting(true);
+    clearError();
     try {
       let inputData: Record<string, unknown> | undefined;
       if (inputMode === 'json') {
@@ -304,14 +322,15 @@ export default function WorkflowRunPage() {
       });
       navigate(`/runs/${result.runId}/execute`);
     } catch (err) {
-      console.error('Failed to start run:', err);
+      // Unified error handling (N3)
+      setError(err);
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const formatDate = (dateStr: string) => {
-    return new Date(dateStr).toLocaleString();
+  const formatDate = (timestamp: number) => {
+    return new Date(timestamp).toLocaleString();
   };
 
   const formatDuration = (ms?: number) => {
@@ -323,10 +342,30 @@ export default function WorkflowRunPage() {
     return `${minutes}m ${seconds % 60}s`;
   };
 
+  // Handle workflow not found (S11)
   if (workflowId && !workflow && !reusableConfig) {
+    // Check if we're still loading
     return (
       <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8 sm:py-12 flex items-center justify-center min-h-[50vh]">
         <div className="w-8 h-8 border-2 border-brand border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  // Handle source run not found for rerun (S11)
+  if (sourceRunNotFound) {
+    return (
+      <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8 sm:py-12">
+        <NotFoundState type="run" identifier={sourceRunId} />
+      </div>
+    );
+  }
+
+  // Handle workflow not found (S11)
+  if (!workflow && !reusableConfig) {
+    return (
+      <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8 sm:py-12">
+        <NotFoundState type="workflow" identifier={workflowId} />
       </div>
     );
   }
@@ -351,25 +390,60 @@ export default function WorkflowRunPage() {
       </div>
 
       {/* Rerun Banner */}
-      {isRerun && sourceRunId && (
+      {isRerun && sourceRunId && reusableConfig && (
         <div className="mb-6 p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
-          <div className="flex items-center justify-between">
-            <div>
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex-1">
               <h3 className="font-medium text-blue-900 dark:text-blue-100">
                 {t('rerun.rerunConfig')}
               </h3>
-              <p className="text-sm text-blue-700 dark:text-blue-300 mt-1">
-                {t('rerun.configPreloaded')}
-              </p>
+              <div className="mt-2 text-sm text-blue-700 dark:text-blue-300 space-y-1">
+                <p>
+                  <span className="font-medium">{t('rerun.sourceRun')}: </span>
+                  <span className="font-mono text-xs">{sourceRunId}</span>
+                </p>
+                <p>
+                  <span className="font-medium">{t('rerun.originalStatus')}: </span>
+                  <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                    reusableConfig.runStatus === 'completed' ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300' :
+                    reusableConfig.runStatus === 'failed' ? 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300' :
+                    'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300'
+                  }`}>
+                    {reusableConfig.runStatus}
+                  </span>
+                </p>
+                <p>
+                  <span className="font-medium">{t('rerun.originalDuration')}: </span>
+                  {formatDuration(reusableConfig.durationMs)}
+                </p>
+              </div>
+              {reusableConfig.runStatus === 'failed' && (
+                <p className="mt-2 text-xs text-amber-700 dark:text-amber-300">
+                  ⚠️ {t('rerun.failedWarning')}
+                </p>
+              )}
             </div>
             <button
               onClick={handleQuickRerun}
               disabled={isSubmitting}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50"
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50 whitespace-nowrap"
             >
               {isSubmitting ? t('rerun.running') : t('rerun.rerunSame')}
             </button>
           </div>
+        </div>
+      )}
+
+      {/* Error State (N3) */}
+      {isError && (
+        <div className="mb-6">
+          <ErrorState
+            code={error?.code}
+            message={error?.message}
+            details={error?.details}
+            onRetry={clearError}
+            showHomeButton={false}
+          />
         </div>
       )}
 
@@ -452,7 +526,7 @@ export default function WorkflowRunPage() {
                               {t(`status.${run.status}`)}
                             </span>
                           </td>
-                          <td className="px-3 py-2 text-muted">{formatDate(run.createdAt)}</td>
+                          <td className="px-3 py-2 text-muted">{formatDate(run.startedAt)}</td>
                           <td className="px-3 py-2 text-muted hidden sm:table-cell">{formatDuration(run.durationMs)}</td>
                           <td className="px-3 py-2 text-right">
                             <button
@@ -523,7 +597,7 @@ export default function WorkflowRunPage() {
                         <div className="flex-1">
                           <p className="text-sm font-medium">{draft.name}</p>
                           <p className="text-xs text-muted">
-                            {formatDate(new Date(draft.createdAt).toISOString())}
+                            {formatDate(draft.createdAt)}
                             {draft.inputData && Object.keys(draft.inputData).length > 0 && (
                               <span> · {Object.keys(draft.inputData).length} fields</span>
                             )}
