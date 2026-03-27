@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 
+import { validateCommandPolicy } from '../security/command-policy.js';
 import type { ScriptPostProcessorConfig } from '../types/index.js';
 
 interface ScriptPostProcessorOptions {
@@ -33,11 +34,12 @@ export async function runScriptPostProcessor(
     OA_STEP_ID: options.stepId,
     OA_PROCESSOR_NAME: processorName,
   };
+  const { executable, args } = validateCommandPolicy(config.command);
 
-  const child = spawn(config.command, {
+  const child = spawn(executable, args, {
     cwd: options.cwd,
     env,
-    shell: true,
+    shell: false,
     stdio: ['pipe', 'pipe', 'pipe'],
   });
 

@@ -29,7 +29,10 @@ describe('Error Recovery Strategy', () => {
         timestamp: 1234567890,
       });
 
-      expect(mockFetch).toHaveBeenCalledWith('https://example.com/webhook', {
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      const [target, options] = mockFetch.mock.calls[0]!;
+      expect(String(target)).toBe('https://example.com/webhook');
+      expect(options).toMatchObject({
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -44,6 +47,7 @@ describe('Error Recovery Strategy', () => {
           timestamp: 1234567890,
         }),
       });
+      expect(options.signal).toBeInstanceOf(AbortSignal);
     });
 
     it('should throw error on non-ok response', async () => {
@@ -81,6 +85,36 @@ describe('Error Recovery Strategy', () => {
       });
 
       expect(mockFetch).toHaveBeenCalled();
+    });
+
+    it('should block private webhook targets by default', async () => {
+      await sendWebhookNotification('http://127.0.0.1:8080/webhook', {
+        workflowId: 'test-workflow',
+        runId: 'run-123',
+        stepId: 'step-1',
+        agent: 'agent-1',
+        error: 'Test error',
+        timestamp: 1234567890,
+      });
+
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it('allows private targets when explicitly enabled', async () => {
+      process.env.OPENAGENTS_ALLOW_PRIVATE_WEBHOOKS = 'true';
+      mockFetch.mockResolvedValueOnce({ ok: true });
+
+      await sendWebhookNotification('http://127.0.0.1:8080/webhook', {
+        workflowId: 'test-workflow',
+        runId: 'run-123',
+        stepId: 'step-1',
+        agent: 'agent-1',
+        error: 'Test error',
+        timestamp: 1234567890,
+      });
+
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      delete process.env.OPENAGENTS_ALLOW_PRIVATE_WEBHOOKS;
     });
   });
 });

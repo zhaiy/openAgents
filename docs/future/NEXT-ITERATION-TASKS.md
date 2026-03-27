@@ -1,26 +1,26 @@
 # OpenAgents 下一期迭代任务拆解
 
-> 创建日期：2026-03-25
+> 创建日期：2026-03-27
 > 对应文档：`docs/future/NEXT-ITERATION-PLAN.md`
-> 适用阶段：下一期“复盘与演进（聚焦版）”迭代
+> 适用阶段：最后一次“产品化收口与标准化 Skill 收尾”迭代
 
 ---
 
 ## 一、文档目的
 
-本文档用于把下一期迭代计划进一步拆成可执行任务，便于：
+本文档用于把最后一次迭代计划拆成可执行任务，便于：
 
 - 做排期
-- 做依赖管理
-- 分配给不同模型或不同开发者
-- 作为阶段验收依据
+- 分配给不同模型或开发者
+- 控制关键路径
+- 作为最后收尾阶段的验收依据
 
 本次拆分强调以下原则：
 
-1. 版本上下文优先
-2. 差异解释优先
-3. 复盘闭环优先
-4. 测试同步优先
+1. 标准优先于适配
+2. 边界优先于包装
+3. 验证优先于扩展
+4. 发布优先于新功能
 
 ---
 
@@ -28,9 +28,9 @@
 
 | 优先级 | 含义 |
 |------|------|
-| `P0` | 必须完成，否则本期“复盘与演进”目标不成立 |
-| `P1` | 强烈建议完成，能显著提升复盘和调优价值 |
-| `P2` | 可伴随推进，用于控制技术债与后续成本 |
+| `P0` | 必须完成，否则“最后收尾”目标不成立 |
+| `P1` | 强烈建议完成，能显著提升长期复用价值 |
+| `P2` | 可伴随推进，但不应阻塞主链路 |
 
 ---
 
@@ -38,10 +38,10 @@
 
 | 等级 | 含义 |
 |------|------|
-| `S` | 涉及版本语义、跨层关联、指标口径、较高联调风险 |
-| `A` | 中高复杂度业务闭环，涉及多个模块 |
-| `B` | 标准页面/API/测试增强任务 |
-| `C` | 收尾、整理、文档、低风险增强 |
+| `S` | 涉及定位、规范、契约边界，判断成本高 |
+| `A` | 跨模块实现，有一定联调和验证成本 |
+| `B` | 中等复杂度实现或文档收口 |
+| `C` | 收尾、整理、低风险改动 |
 
 ---
 
@@ -49,20 +49,17 @@
 
 建议按以下顺序推进：
 
-1. `E1` 运行版本快照与关联基线
-2. `E2` 版本差异视图
-3. `E4` 失败 run 复盘摘要
-4. `E6` 复盘与趋势测试补强
-5. `E3` 历史趋势分析
-6. `E5` 复盘链路联动收口
-7. `E7` 快照与聚合层适度整理
+1. `F1` 标准化 Skill 规范
+2. `F3` 安全边界与执行策略收口
+3. `F2` 健康检查与运行前诊断
+4. `F4` 运行契约与事件口径收口
+5. `F5` 文档与发布收尾
+6. `F6` 回归测试与收尾验证
 
 关键路径如下：
 
 ```text
-E1 -> E2 -> E4 -> E5 -> E6
-  \-> E3 -----------^
-E7 可伴随进行，但不应阻塞主链路
+F1 -> F3 -> F2 -> F4 -> F5 -> F6
 ```
 
 ---
@@ -71,272 +68,268 @@ E7 可伴随进行，但不应阻塞主链路
 
 | 编号 | 名称 | 优先级 | 难度 | 依赖 |
 |------|------|------|------|------|
-| E1 | 运行版本快照与关联基线 | P0 | S | 无 |
-| E2 | 版本差异视图 | P0 | A | E1 |
-| E3 | 历史趋势分析 | P1 | A | E1 |
-| E4 | 失败 run 复盘摘要 | P0 | A | E1, E2 |
-| E5 | 复盘链路联动收口 | P1 | B | E2, E3, E4 |
-| E6 | 复盘与趋势测试补强 | P0 | A | E1, E2, E4, E5 |
-| E7 | 快照与聚合层适度整理 | P2 | B | E1, E3, E4 |
+| F1 | 标准化 Skill 规范 | P0 | S | 无 |
+| F2 | 健康检查与运行前诊断 | P0 | A | F1, F3 |
+| F3 | 安全边界与执行策略收口 | P0 | A | F1 |
+| F4 | 运行契约与事件口径收口 | P1 | A | F1, F2 |
+| F5 | 文档与发布收尾 | P0 | B | F1, F2, F3, F4 |
+| F6 | 回归测试与收尾验证 | P0 | A | F2, F3, F4, F5 |
 
 ---
 
 ## 六、详细任务拆解
 
-## E1. 运行版本快照与关联基线
+## F1. 标准化 Skill 规范
 
 ### 目标
 
-先定义清楚 run 的版本来源、快照引用和与 recover / rerun 的承接关系，避免后续差异分析和复盘摘要建立在不稳定的历史样本上。
+把 OpenAgents 面向外部 Agent 工具的“接入方式”收敛成标准化 Skill 规范，而不是继续扩张 Adapter 代码。
 
 ### 重点范围
 
-- `src/app/dto.ts`
-- `src/app/services/run-service.ts`
-- `src/app/services/run-registry.ts`
-- `src/app/services/workflow-service.ts`
-- `src/web/routes.ts`
-- `web/src/api/index.ts`
+- `docs/future/` 或 `docs/` 中新增规范文档
+- `src/skills/`
+- `src/config/schema.ts`
+- `src/types/index.ts`
+- 相关测试
 
 ### 子任务
 
-1. 定义 run version snapshot / provenance DTO
-2. 明确 source run、recovered run、rerun run 的版本关联字段
-3. 固化 workflow / agent / prompt / config 的最小可追踪上下文
-4. 收口 run detail、compare、diagnostics 共享的版本字段
-5. 补关键契约测试
+1. 定义 Skill 最小元数据与能力声明格式
+2. 定义输入输出、CLI 调用、退出码和错误语义约定
+3. 定义权限、依赖、风险标签的表达方式
+4. 梳理当前 Skill 实现与规范的差距
+5. 补基础 schema / contract 测试
 
 ### 建议产出
 
-- 运行版本快照契约表
-- 版本关联说明
+- Skill 规范文档
+- Skill 声明字段清单
+- 规范与现状差距说明
 - 契约测试
 
 ### 验收标准
 
-- 用户可以知道一个 run 来自哪版 workflow 和关键配置
-- 前后端不再各自推断版本来源
-- rerun / recover 的版本承接关系清楚
+- 外部 Agent/LLM 可只凭文档理解 Skill 如何使用
+- 当前 Skill 结构与规范关系清楚
+- 没有继续引入重型 Adapter 方案
 
 ---
 
-## E2. 版本差异视图
+## F2. 健康检查与运行前诊断
 
 ### 目标
 
-把 compare 从“展示结果差异”推进到“解释版本差异和可能影响”，让用户更容易判断变化来源。
+让用户在发起 workflow 前就知道当前项目是否具备“可运行条件”。
+
+### 重点范围
+
+- `src/cli/`
+- `src/app/services/`
+- `src/config/`
+- `src/runtime/`
+- `README.md`
+- 相关测试
+
+### 子任务
+
+1. 设计 `doctor` / `preflight` 命令或等价入口
+2. 检查 project config、runtime config、workflow 引用、agent 引用、skill 引用
+3. 检查关键环境变量和 API key 配置状态
+4. 对高风险配置给出 warning
+5. 输出结构化诊断结果和修复建议
+
+### 建议产出
+
+- 运行前诊断命令
+- 诊断结果结构定义
+- 诊断输出示例
+- 诊断测试
+
+### 验收标准
+
+- 用户在运行前可识别主要配置缺失
+- 常见错误不必等到 workflow 执行后才暴露
+- 诊断结果可读且可行动
+
+---
+
+## F3. 安全边界与执行策略收口
+
+### 目标
+
+围绕脚本执行、外部命令、webhook 等能力，统一项目的安全默认策略与放开方式。
+
+### 重点范围
+
+- `src/runtime/`
+- `src/engine/post-processor.ts`
+- `src/output/notifier.ts`
+- `src/config/schema.ts`
+- `README.md`
+- 安全文档
+
+### 子任务
+
+1. 梳理高风险能力及其默认策略
+2. 明确哪些能力属于“受信任本地执行”
+3. 定义可配置放开项与文档说明
+4. 收口对应配置校验和警告逻辑
+5. 补相关测试
+
+### 建议产出
+
+- 安全边界说明文档
+- 默认策略清单
+- 配置与校验增强
+- 相关测试
+
+### 验收标准
+
+- 用户能明确知道哪些能力有风险
+- 默认行为与文档说明一致
+- 高风险能力具备最小必要保护
+
+---
+
+## F4. 运行契约与事件口径收口
+
+### 目标
+
+把 OpenAgents 对外暴露的 CLI、运行状态、事件、输出产物口径固定下来，便于长期复用。
 
 ### 重点范围
 
 - `src/app/dto.ts`
-- `src/app/services/run-compare-service.ts`
-- `src/app/services/diagnostics-service.ts`
+- `src/app/services/`
 - `src/web/routes.ts`
-- `web/src/pages/RunComparisonPage.tsx`
-- `web/src/pages/RunDetailPage.tsx`
+- `README.md`
+- 相关测试
 
 ### 子任务
 
-1. 聚合 workflow 结构、节点配置、模型、提示词等差异
-2. 区分执行路径变化与输出风险变化
-3. 让 compare 支持显示差异摘要与影响提示
-4. 为失败 run 或回归 run 挂接版本变化背景
-5. 补差异契约与页面测试
+1. 盘点当前 CLI / run / step / event / output 字段
+2. 标记哪些字段属于对外稳定契约
+3. 补齐必要说明或小幅收口
+4. 给出退出码和错误分类说明
+5. 补 contract / route / service 测试
 
 ### 建议产出
 
-- 版本差异 DTO
-- 差异摘要区
-- 差异聚合测试
+- 契约清单
+- 字段稳定性说明
+- 契约测试
 
 ### 验收标准
 
-- 用户能回答“这两次 run 到底变了什么”
-- compare 可说明变化可能影响的范围
-- 差异结果在页面和 API 中口径一致
+- 运行相关关键字段不再口径漂移
+- 后续复用者能知道哪些字段可依赖
+- CLI 和输出目录说明清楚
 
 ---
 
-## E3. 历史趋势分析
+## F5. 文档与发布收尾
 
 ### 目标
 
-建立 workflow 级趋势摘要，让恢复、成本、质量等指标从单次观察升级为历史比较。
+把 README、Quick Start、接入说明、发布检查材料整理到可以正式收尾交付的程度。
 
 ### 重点范围
 
-- `src/app/dto.ts`
-- `src/app/services/run-metrics.ts`
-- `src/app/services/run-service.ts`
-- `src/app/services/diagnostics-service.ts`
-- `src/web/routes.ts`
-- `web/src/pages/HomePage.tsx`
-- `web/src/pages/RunsPage.tsx`
-- `web/src/pages/WorkflowOverviewPage.tsx`
+- `README.md`
+- `docs/`
+- 发布说明文档
+- 发布检查清单
 
 ### 子任务
 
-1. 定义最近 N 次运行的趋势聚合口径
-2. 聚合成功率、失败率、duration、token、gate、recovery 等核心指标
-3. 增加基础回归或异常波动提示
-4. 在首页、runs 或 workflow 概览补趋势摘要入口
-5. 补趋势统计测试
+1. README 收口到真实推荐路径
+2. 增加 Skill 规范和安全边界入口
+3. 增加运行前诊断入口说明
+4. 补发布检查清单
+5. 草拟最终版本发布说明
 
 ### 建议产出
 
-- workflow trend DTO
-- 趋势摘要卡片或列表增强
-- 趋势口径测试
+- 更新后的 README
+- 发布检查清单
+- 发布说明草案
 
 ### 验收标准
 
-- 用户能看出某个 workflow 最近是变好还是变差
-- 关键指标在不同页面不各算一套
-- 回归信号至少具备基础可见性
+- 首次阅读者能理解项目定位
+- README 能引导完成基础使用路径
+- 发布前需要人工确认的事项有清单可查
 
 ---
 
-## E4. 失败 run 复盘摘要
+## F6. 回归测试与收尾验证
 
 ### 目标
 
-围绕失败 run 提供结构化复盘摘要，让 diagnostics 和 run detail 不再只是零散信息堆叠。
-
-### 重点范围
-
-- `src/app/dto.ts`
-- `src/app/services/diagnostics-service.ts`
-- `src/app/services/run-compare-service.ts`
-- `src/app/services/recovery-planner.ts`
-- `src/web/routes.ts`
-- `web/src/pages/DiagnosticsPage.tsx`
-- `web/src/pages/RunDetailPage.tsx`
-- `web/src/pages/RunExecutionPage.tsx`
-
-### 子任务
-
-1. 汇总失败节点、失败类型和下游影响范围
-2. 结合版本差异、恢复关系和关键指标生成复盘摘要
-3. 提供 compare、recover、rerun-with-edits 等后续动作入口
-4. 统一 diagnostics 与 run detail 的复盘表达
-5. 补复盘摘要测试
-
-### 建议产出
-
-- 失败复盘 DTO
-- 复盘摘要区
-- 复盘聚合测试
-
-### 验收标准
-
-- 用户能更快理解失败发生在哪、影响到哪里
-- 复盘摘要不是无来源文本，而是基于已有结构化数据
-- diagnostics 可直接引导下一步动作
-
----
-
-## E5. 复盘链路联动收口
-
-### 目标
-
-把 diagnostics、compare、timeline、recovery 这些已有能力串成一条更完整的复盘链路。
-
-### 重点范围
-
-- `src/web/routes.ts`
-- `web/src/api/index.ts`
-- `web/src/pages/DiagnosticsPage.tsx`
-- `web/src/pages/RunComparisonPage.tsx`
-- `web/src/pages/RunDetailPage.tsx`
-- `web/src/pages/RunExecutionPage.tsx`
-
-### 子任务
-
-1. 统一失败 run 的推荐入口和导航表达
-2. 让版本差异、趋势、复盘摘要可互相跳转
-3. 强化 recovered run 与 source run 的复盘联动
-4. 收口关键文案、空态、异常态
-5. 补页面级 smoke / E2E 测试
-
-### 建议产出
-
-- 复盘导航闭环
-- 页面联动收口
-- smoke / E2E 用例
-
-### 验收标准
-
-- 用户不需要自己拼复盘路径
-- run detail、diagnostics、compare 的角色边界更清晰
-- 联动入口在异常态下也有合理反馈
-
----
-
-## E6. 复盘与趋势测试补强
-
-### 目标
-
-建立版本、差异、趋势、复盘主链路的自动化保护，避免这期能力变成表面可看但后续容易回退的薄层功能。
+确保最后一轮“标准、边界、诊断、文档收尾”不是脆弱改动，而是有自动化和人工验收托底。
 
 ### 重点范围
 
 - `src/__tests__/`
-- `src/app/services/*.test.ts`
-- `web/tests/`
+- `web/`
+- README 手动验收
+- 发布检查清单
 
 ### 子任务
 
-1. 版本快照与 run 关联测试
-2. 差异 DTO / route / service 测试
-3. 趋势口径测试
-4. 失败复盘摘要测试
-5. 关键跨页面复盘链路 smoke / E2E 回归
+1. 补 doctor / preflight 测试
+2. 补 Skill 规范相关测试
+3. 补安全边界测试
+4. 补关键契约测试
+5. 形成最终人工验收路径
 
 ### 建议产出
 
-- 复盘测试矩阵
-- 一组差异与趋势统计测试
-- 一组页面级复盘回归用例
+- 测试补强
+- 验收清单
+- 最终验证记录
 
 ### 验收标准
 
-- 至少一条完整复盘主链路有自动化覆盖
-- 版本差异和趋势口径的回归可被及时发现
-- 页面联动变化不会静默破坏复盘体验
+- 本轮新增能力有自动化保护
+- 收尾后的关键路径可手动验证
+- 发布前风险有明确检查项
 
 ---
 
-## E7. 快照与聚合层适度整理
+## 七、不在本轮范围内
 
-### 目标
+- 不做模板库扩充
+- 不做多厂商专用 Adapter 体系
+- 不做新的大型 Web 模块
+- 不做 SaaS 化、多人协作或复杂权限系统
+- 不做与当前定位无关的“展示型能力”
 
-适度整理版本快照、趋势统计、复盘摘要相关聚合逻辑，为后续更深的版本演进与趋势分析做结构预留。
+---
 
-### 重点范围
+## 八、推荐分工建议
 
-- `src/app/services/run-metrics.ts`
-- `src/app/services/run-compare-service.ts`
-- `src/app/services/diagnostics-service.ts`
-- `src/app/dto.ts`
-- `src/web/routes.ts`
+### 更适合强模型主导的任务
 
-### 子任务
+- `F1` 标准化 Skill 规范
+- `F4` 运行契约与事件口径收口
+- `F5` 文档与发布收尾中的定位与边界说明
 
-1. 收敛重复的版本和趋势聚合逻辑
-2. 明确快照 DTO、trend DTO、recap DTO 的职责边界
-3. 清理明显无价值的兼容字段
-4. 补统计口径说明
-5. 补必要的低风险回归测试
+### 更适合中强模型落地的任务
 
-### 建议产出
+- `F2` 健康检查与运行前诊断
+- `F3` 安全边界与执行策略收口
+- `F6` 测试补强与验收清单落地
 
-- 轻量聚合层整理
-- 口径说明文档
-- 低风险结构回归测试
+---
 
-### 验收标准
+## 九、阶段验收建议
 
-- 聚合逻辑不再分散在多个页面和服务里
-- 版本、趋势、复盘三类字段含义更清晰
-- 下一轮趋势与复盘增强不需要大面积返工
+建议按以下里程碑检查：
 
+1. `M1` Skill 规范确定，团队对“不做 Adapter”达成一致
+2. `M2` preflight/doctor 能发现主要运行前问题
+3. `M3` 高风险能力边界和默认策略全部收口
+4. `M4` README、契约、发布清单可独立阅读使用
+5. `M5` 测试和手动验收通过，准备项目收尾发布

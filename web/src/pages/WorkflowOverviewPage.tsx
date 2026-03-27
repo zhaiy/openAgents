@@ -26,7 +26,7 @@ import '@xyflow/react/dist/style.css';
 
 import { useTranslation } from '../i18n';
 import { useApi } from '../hooks/useApi';
-import { visualApi, diagnosticsApi, type WorkflowVisualNode, type WorkflowQualitySummary } from '../api';
+import { visualApi, diagnosticsApi, type WorkflowVisualNode } from '../api';
 import { adaptWorkflowToFlowNodes, adaptWorkflowToFlowEdges } from '../lib/graph';
 import { layoutDAG } from '../lib/graph';
 import { NodeCard } from '../components/nodes/NodeCard';

@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useTranslation } from '../i18n';
 import { useApi } from '../hooks/useApi';
-import { runApi, diagnosticsApi, createSSEConnection, type RunEvent, type Step, type DiagnosticsSummary } from '../api';
+import { runApi, diagnosticsApi, createSSEConnection, type RunEvent, type Step } from '../api';
 import { Badge } from '../components/ui/Badge';
 
 type Tab = 'steps' | 'output' | 'logs' | 'eval';
@@ -119,6 +119,8 @@ export default function RunDetailPage() {
   };
 
   const outputSteps = run.steps.filter((s) => s.output || streamBuffer[s.stepId]);
+  const sourceRunInfo = diagnostics?.sourceRunInfo;
+  const recoveredFrom = run.recoveredFrom;
 
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8 sm:py-12">
@@ -130,13 +132,13 @@ export default function RunDetailPage() {
               {t(`status.${run.status}`)}
             </span>
             {/* Recovered from indicator - E5 */}
-            {run.recoveredFrom && (
+            {recoveredFrom && (
               <button
-                onClick={() => navigate(`/runs/${run.recoveredFrom.runId}`)}
+                onClick={() => navigate(`/runs/${recoveredFrom.runId}`)}
                 className="flex items-center gap-1 px-2 py-1 text-xs bg-purple-100 hover:bg-purple-200 dark:bg-purple-900/30 dark:hover:bg-purple-900/50 text-purple-700 dark:text-purple-300 rounded-lg transition-colors"
-                title={`Recovered from ${run.recoveredFrom.runId}`}
+                title={`Recovered from ${recoveredFrom.runId}`}
               >
-                ♻️ From: {run.recoveredFrom.runId.slice(0, 8)}...
+                ♻️ From: {recoveredFrom.runId.slice(0, 8)}...
               </button>
             )}
           </div>
@@ -312,51 +314,51 @@ export default function RunDetailPage() {
           )}
 
           {/* Recovery Context - E5: source linkage */}
-          {(run.recoveredFrom || diagnostics?.sourceRunInfo) && (
+          {(recoveredFrom || sourceRunInfo) && (
             <div className="bg-panel rounded-xl border border-purple-200 dark:border-purple-800 p-6">
               <div className="flex items-center gap-2 mb-3">
                 <span className="text-lg">♻️</span>
                 <h4 className="text-sm font-medium">{t('runDetail.recoveredFrom') || 'Recovery Context'}</h4>
-                {diagnostics?.sourceRunInfo && (
+                {sourceRunInfo && (
                   <Badge variant="default" className="text-xs">
-                    {diagnostics.sourceRunInfo.relationship}
+                    {sourceRunInfo.relationship}
                   </Badge>
                 )}
               </div>
 
               <div className="space-y-2 text-sm">
                 {/* Source Run Link - prefer sourceRunInfo */}
-                {diagnostics?.sourceRunInfo ? (
+                {sourceRunInfo ? (
                   <button
-                    onClick={() => navigate(`/runs/${diagnostics.sourceRunInfo.sourceRunId}`)}
+                    onClick={() => navigate(`/runs/${sourceRunInfo.sourceRunId}`)}
                     className="block w-full text-left px-3 py-2 bg-purple-50 hover:bg-purple-100 dark:bg-purple-900/20 dark:hover:bg-purple-900/40 rounded-lg transition-colors"
                   >
                     <div className="text-xs text-muted mb-1">Source Run</div>
-                    <div className="font-mono text-xs truncate">{diagnostics.sourceRunInfo.sourceRunId}</div>
+                    <div className="font-mono text-xs truncate">{sourceRunInfo.sourceRunId}</div>
                   </button>
-                ) : run.recoveredFrom ? (
+                ) : recoveredFrom ? (
                   <button
-                    onClick={() => navigate(`/runs/${run.recoveredFrom.runId}`)}
+                    onClick={() => navigate(`/runs/${recoveredFrom.runId}`)}
                     className="block w-full text-left px-3 py-2 bg-purple-50 hover:bg-purple-100 dark:bg-purple-900/20 dark:hover:bg-purple-900/40 rounded-lg transition-colors"
                   >
                     <div className="text-xs text-muted mb-1">Source Run</div>
-                    <div className="font-mono text-xs truncate">{run.recoveredFrom.runId}</div>
+                    <div className="font-mono text-xs truncate">{recoveredFrom.runId}</div>
                   </button>
                 ) : null}
 
                 {/* Step counts - prefer sourceRunInfo */}
                 <div className="flex items-center gap-2 text-xs text-muted">
-                  {diagnostics?.sourceRunInfo ? (
+                  {sourceRunInfo ? (
                     <>
-                      <span>Reused: {diagnostics.sourceRunInfo.reusedStepCount} steps</span>
+                      <span>Reused: {sourceRunInfo.reusedStepCount} steps</span>
                       <span>·</span>
-                      <span>Re-run: {diagnostics.sourceRunInfo.rerunStepCount} steps</span>
+                      <span>Re-run: {sourceRunInfo.rerunStepCount} steps</span>
                     </>
-                  ) : run.recoveredFrom ? (
+                  ) : recoveredFrom ? (
                     <>
-                      <span>Reused: {run.recoveredFrom.reusedStepIds.length} steps</span>
+                      <span>Reused: {recoveredFrom.reusedStepIds.length} steps</span>
                       <span>·</span>
-                      <span>Re-run: {run.recoveredFrom.rerunStepIds.length} steps</span>
+                      <span>Re-run: {recoveredFrom.rerunStepIds.length} steps</span>
                     </>
                   ) : null}
                 </div>

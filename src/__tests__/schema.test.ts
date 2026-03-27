@@ -294,6 +294,25 @@ describe('schema validation', () => {
       expect(result.success).toBe(true);
     });
 
+    it('rejects post_processor command using shell executable', () => {
+      const result = WorkflowConfigSchema.safeParse({
+        workflow: { id: 'novel_writing', name: 'Novel', description: 'desc' },
+        steps: [
+          {
+            id: 'outline',
+            agent: 'planner',
+            task: 'task',
+            post_processors: [{ type: 'script', command: 'bash -lc "echo unsafe"' }],
+          },
+        ],
+        output: { directory: './output' },
+      });
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.issues.some((issue) => issue.message.includes('not allowed'))).toBe(true);
+      }
+    });
+
     it('rejects script post_processor without command', () => {
       const result = WorkflowConfigSchema.safeParse({
         workflow: { id: 'novel_writing', name: 'Novel', description: 'desc' },

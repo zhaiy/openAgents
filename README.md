@@ -176,8 +176,8 @@ flowchart LR
 
 ```mermaid
 flowchart TB
-  U["User / CLI"] --> CLI["CLI Commands\nrun / resume / validate / eval / debug"]
-  CLI --> CFG["Config Loader\nopenagents.yaml / agents / workflows / skills"]
+  U["User / CLI"] --> CLI["CLI Commands<br/>run / resume / validate / eval / debug"]
+  CLI --> CFG["Config Loader<br/>openagents.yaml / agents / workflows / skills"]
   CLI --> ENG["Workflow Engine"]
 
   CFG --> ENG
@@ -192,10 +192,10 @@ flowchart TB
   RT --> LLM["LLM Direct Runtime"]
   RT --> SCRIPT["Script Runtime"]
 
-  LLM --> PROVIDER["LLM Provider API\nstreaming / non-streaming"]
+  LLM --> PROVIDER["LLM Provider API<br/>streaming / non-streaming"]
   SCRIPT --> LOCAL["Local Scripts / Tools"]
 
-  OUT --> FILES["Run Directory\noutputs / events.jsonl / eval.json"]
+  OUT --> FILES["Run Directory<br/>outputs / events.jsonl / eval.json"]
   STATE --> FILES
   EVAL --> FILES
 ```

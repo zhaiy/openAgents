@@ -21,6 +21,7 @@ import type {
   ToolConfig,
   WorkflowConfig,
 } from '../types/index.js';
+import { validateCommandPolicy } from '../security/command-policy.js';
 
 const idRegex = /^[a-z][a-z0-9_-]*$/;
 
@@ -52,6 +53,16 @@ const ScriptPostProcessorConfigSchema = z.object({
   timeout_ms: z.number().int().positive().optional(),
   max_output_chars: z.number().int().positive().optional(),
   on_error: PostProcessorErrorModeSchema.optional(),
+}).superRefine((config, ctx) => {
+  try {
+    validateCommandPolicy(config.command);
+  } catch (error) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['command'],
+      message: error instanceof Error ? error.message : 'invalid post-processor command',
+    });
+  }
 }) satisfies z.ZodType<ScriptPostProcessorConfig>;
 
 export const SkillConfigSchema = z.object({

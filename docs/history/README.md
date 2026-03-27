@@ -12,8 +12,7 @@
   - `v0.5.0` 之后这一轮“功能收口、架构加固、核心流程做扎实”的已完成迭代文档
 - `2026-03-phase-04-iteration-2-recovery-observability/`
   - “恢复与观测”这一轮已完成迭代的规划、任务拆解和模型提示词归档
+- `2026-03-phase-05-iteration-3-retrospective/`
+  - “复盘与演进（聚焦版）”这一轮的规划、任务拆解、交接文档，以及本轮落地的两项配置能力 RFC 归档
 
-仍在继续使用、尚未归档的前瞻性文档保留在 `docs/future/`，例如：
-
-- `THREE-ITERATIONS-ROADMAP.md`
-
+仍在继续使用、尚未归档的前瞻性文档保留在 `docs/future/`。
