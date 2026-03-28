@@ -44,7 +44,7 @@
 | run-compare-service.test.ts | ✅ 通过 | 19 |
 | script-runtime.test.ts | ✅ 通过 | 21 |
 
-**总计**: 36 测试文件, 563 测试用例, 全部通过
+**总计**: 37 测试文件, 570 测试用例, 全部通过
 
 ---
 
@@ -118,9 +118,9 @@
 
 ### CLI 命令
 
-- [ ] `openagents --help` 显示帮助
-- [ ] `openagents doctor` 运行诊断
-- [ ] `openagents skills list` 列出技能
+- [x] `openagents --help` 显示帮助
+- [x] `openagents doctor` 运行诊断
+- [x] `openagents skills list` 列出技能
 - [ ] `openagents events stream --run <id> --json` 输出事件
 
 ### Web UI
@@ -133,10 +133,10 @@
 
 ### 文档
 
-- [ ] README.md 链接有效
-- [ ] docs/SKILL-SPEC.md 完整
-- [ ] docs/SECURITY.md 完整
-- [ ] docs/EVENT-CONTRACT.md 完整
+- [x] README.md 链接有效
+- [x] docs/SKILL-SPEC.md 完整
+- [x] docs/SECURITY.md 完整
+- [x] docs/EVENT-CONTRACT.md 完整
 
 ---
 

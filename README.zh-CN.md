@@ -447,9 +447,12 @@ OPENAGENTS_LANG=zh npx tsx src/cli/index.ts run novel_writing --input "悬疑故
 ## 相关文档
 
 - [English README](./README.md)
-- [技术设计](./docs/TECHNICAL-DESIGN.md)
-- [开发进度](./docs/PROGRESS.md)
-- [功能路线图](./docs/FEATURE-ROADMAP.md)
+- [Skill 规范](./docs/SKILL-SPEC.md) — 标准化 Skill 格式，用于跨工具兼容
+- [安全策略](./docs/SECURITY.md) — 安全边界与执行策略
+- [事件契约](./docs/EVENT-CONTRACT.md) — 面向外部 Agent 的稳定事件 Schema
+- [发布说明](./docs/RELEASE-NOTES.md) — v1.0.0 发布说明
+- [技术设计](./docs/history/2026-03-phase-02-webui-buildout/TECHNICAL-DESIGN.md)（已归档）
+- [功能路线图](./docs/history/2026-03-phase-01-core-planning/FEATURE-ROADMAP.md)（已归档）
 
 ## 许可证
 

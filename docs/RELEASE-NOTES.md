@@ -29,7 +29,7 @@ A complete skill specification for cross-tool compatibility:
 - Risk level assessment
 - Usage examples
 
-See [Skill Specification](./docs/SKILL-SPEC.md) for details.
+See [Skill Specification](./SKILL-SPEC.md) for details.
 
 ### F2: Preflight Diagnostics
 
@@ -57,7 +57,7 @@ Enhanced security with default-secure approach:
   - HTTPS enforcement
   - URL whitelist support
 
-See [Security Documentation](./docs/SECURITY.md) for details.
+See [Security Documentation](./SECURITY.md) for details.
 
 ### F4: Event Streaming
 
@@ -73,7 +73,7 @@ Features:
 - Resume from specific sequence
 - Heartbeat for long-running tasks
 
-See [Event Contract](./docs/EVENT-CONTRACT.md) for details.
+See [Event Contract](./EVENT-CONTRACT.md) for details.
 
 ## New CLI Commands
 

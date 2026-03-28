@@ -512,10 +512,10 @@ OPENAGENTS_LANG=zh npx tsx src/cli/index.ts run novel_writing --input "悬疑故
 - [Skill Specification](./docs/SKILL-SPEC.md) — Standardized skill format for cross-tool compatibility
 - [Security Policy](./docs/SECURITY.md) — Security boundaries and execution policies
 - [Event Contract](./docs/EVENT-CONTRACT.md) — Stable event schema for external agents
-- [Technical Design](./docs/TECHNICAL-DESIGN.md)
-- [Web UI Technical Design](./docs/TECHNICAL-DESIGN-WEBUI.md)
-- [Development Progress](./docs/PROGRESS.md)
-- [Feature Roadmap](./docs/FEATURE-ROADMAP.md)
+- [Release Notes](./docs/RELEASE-NOTES.md) — v1.0.0 release notes
+- [Technical Design](./docs/history/2026-03-phase-02-webui-buildout/TECHNICAL-DESIGN.md) (archived)
+- [Web UI Technical Design](./docs/history/2026-03-phase-02-webui-buildout/TECHNICAL-DESIGN-WEBUI.md) (archived)
+- [Feature Roadmap](./docs/history/2026-03-phase-01-core-planning/FEATURE-ROADMAP.md) (archived)
 
 ## License
 

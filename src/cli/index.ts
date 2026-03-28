@@ -37,7 +37,7 @@ const defaultLocale = getDefaultLocale();
 program
   .name('openagents')
   .description(t(defaultLocale, 'cliDescription'))
-  .version('0.1.0')
+  .version('1.0.0')
   .option('--lang <locale>', t(defaultLocale, 'langOption'), (value: string) => resolveLocale(value), defaultLocale);
 
 program.addCommand(createRunCommand());
